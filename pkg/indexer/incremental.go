@@ -109,14 +109,18 @@ func (r *IndexRunner) processImmediateIncrementals() {
 
 // runIncrementalIndexer executes an incremental indexer for given block range
 func (r *IndexRunner) runIncrementalIndexer(indexerFile string, indexerType string, firstBlock, lastBlock uint64) error {
-	params := []struct{ key, value string }{
-		{"{chain_id:UInt32}", fmt.Sprintf("%d", r.chainId)},
-		{"{first_block:UInt64}", fmt.Sprintf("%d", firstBlock)},
-		{"{last_block:UInt64}", fmt.Sprintf("%d", lastBlock)},
+	// No template parameters for incrementals
+	templateParams := []struct{ key, value string }{}
+
+	// Bind parameters (native ClickHouse parameter binding)
+	bindParams := map[string]interface{}{
+		"chain_id":    r.chainId,
+		"first_block": firstBlock,
+		"last_block":  lastBlock,
 	}
 
 	filename := fmt.Sprintf("incremental/%s/%s.sql", indexerType, indexerFile)
-	return executeSQLFile(r.conn, r.sqlDir, filename, params)
+	return executeSQLFile(r.conn, r.sqlDir, filename, templateParams, bindParams)
 }
 
 // shouldRun checks if enough time has passed since last run

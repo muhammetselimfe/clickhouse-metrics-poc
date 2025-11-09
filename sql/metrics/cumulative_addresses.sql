@@ -12,18 +12,18 @@ first_appearances AS (
     FROM (
         SELECT from as address, block_time
         FROM raw_traces
-        WHERE chain_id = {chain_id:UInt32}
-          AND block_time >= {first_period:DateTime}
-          AND block_time < {last_period:DateTime}
+        WHERE chain_id = @chain_id
+          AND block_time >= @first_period
+          AND block_time < @last_period
           AND from != unhex('0000000000000000000000000000000000000000')
         
         UNION ALL
         
         SELECT to as address, block_time
         FROM raw_traces
-        WHERE chain_id = {chain_id:UInt32}
-          AND block_time >= {first_period:DateTime}
-          AND block_time < {last_period:DateTime}
+        WHERE chain_id = @chain_id
+          AND block_time >= @first_period
+          AND block_time < @last_period
           AND to IS NOT NULL
           AND to != unhex('0000000000000000000000000000000000000000')
     ) AS all_occurrences
@@ -43,23 +43,23 @@ baseline AS (
     FROM (
         SELECT from as address
         FROM raw_traces
-        WHERE chain_id = {chain_id:UInt32}
-          AND block_time < {first_period:DateTime}
+        WHERE chain_id = @chain_id
+          AND block_time < @first_period
           AND from != unhex('0000000000000000000000000000000000000000')
         
         UNION ALL
         
         SELECT to as address
         FROM raw_traces
-        WHERE chain_id = {chain_id:UInt32}
-          AND block_time < {first_period:DateTime}
+        WHERE chain_id = @chain_id
+          AND block_time < @first_period
           AND to IS NOT NULL
           AND to != unhex('0000000000000000000000000000000000000000')
     ) AS historical_addresses
 )
 -- Running sum of new addresses + baseline
 SELECT
-    {chain_id:UInt32} as chain_id,
+    {chain_id} as chain_id,
     'cumulative_addresses' as metric_name,
     '{granularity}' as granularity,
     period,

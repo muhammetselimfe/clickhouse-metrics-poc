@@ -3,7 +3,7 @@
 
 INSERT INTO metrics (chain_id, metric_name, granularity, period, value)
 SELECT
-    {chain_id:UInt32} as chain_id,
+    {chain_id} as chain_id,
     'active_addresses' as metric_name,
     '{granularity}' as granularity,
     toStartOf{granularityCamelCase}(block_time) as period,
@@ -11,18 +11,18 @@ SELECT
 FROM (
     SELECT from as address, block_time
     FROM raw_traces
-    WHERE chain_id = {chain_id:UInt32}
-      AND block_time >= {first_period:DateTime}
-      AND block_time < {last_period:DateTime}
+    WHERE chain_id = @chain_id
+      AND block_time >= @first_period
+      AND block_time < @last_period
       AND from != unhex('0000000000000000000000000000000000000000')
     
     UNION ALL
     
     SELECT to as address, block_time
     FROM raw_traces
-    WHERE chain_id = {chain_id:UInt32}
-      AND block_time >= {first_period:DateTime}
-      AND block_time < {last_period:DateTime}
+    WHERE chain_id = @chain_id
+      AND block_time >= @first_period
+      AND block_time < @last_period
       AND to IS NOT NULL
       AND to != unhex('0000000000000000000000000000000000000000')
 )

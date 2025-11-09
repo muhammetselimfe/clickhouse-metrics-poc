@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
-// executeSQLFile reads and executes a SQL file with parameter substitution
-func executeSQLFile(conn driver.Conn, sqlDir string, filename string, params []struct{ key, value string }) error {
+// executeSQLFile reads and executes a SQL file with parameter substitution and binding
+func executeSQLFile(conn driver.Conn, sqlDir string, filename string, templateParams []struct{ key, value string }, bindParams map[string]interface{}) error {
 	sqlPath := filepath.Join(sqlDir, filename)
 	sqlBytes, err := os.ReadFile(sqlPath)
 	if err != nil {
@@ -27,14 +28,20 @@ func executeSQLFile(conn driver.Conn, sqlDir string, filename string, params []s
 			continue
 		}
 
-		// Replace placeholders in order (important for patterns like toStartOf{granularity})
+		// Replace template placeholders (things like {granularity})
 		sql := stmt
-		for _, param := range params {
+		for _, param := range templateParams {
 			sql = strings.ReplaceAll(sql, param.key, param.value)
 		}
 
-		// Execute statement
-		if err := conn.Exec(context.Background(), sql); err != nil {
+		// Convert bindParams map to clickhouse.Named parameters
+		var namedParams []interface{}
+		for key, value := range bindParams {
+			namedParams = append(namedParams, clickhouse.Named(key, value))
+		}
+
+		// Execute statement with parameter binding
+		if err := conn.Exec(context.Background(), sql, namedParams...); err != nil {
 			// Check if it's a CREATE TABLE that already exists (not an error)
 			if !strings.Contains(err.Error(), "already exists") {
 				return fmt.Errorf("failed to execute SQL: %w\nStatement: %s", err, sql)

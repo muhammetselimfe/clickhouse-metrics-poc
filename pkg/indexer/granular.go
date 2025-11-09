@@ -52,14 +52,20 @@ func (r *IndexRunner) runGranularMetric(metricFile string, granularity string, p
 	firstPeriod := periods[0]
 	lastPeriod := nextPeriod(periods[len(periods)-1], granularity) // exclusive end
 
-	params := []struct{ key, value string }{
-		{"{chain_id:UInt32}", fmt.Sprintf("%d", r.chainId)},
-		{"{first_period:DateTime}", fmt.Sprintf("toDateTime64('%s', 3)", firstPeriod.Format("2006-01-02 15:04:05.000"))},
-		{"{last_period:DateTime}", fmt.Sprintf("toDateTime64('%s', 3)", lastPeriod.Format("2006-01-02 15:04:05.000"))},
+	// Template parameters (string replacement)
+	templateParams := []struct{ key, value string }{
+		{"{chain_id}", fmt.Sprintf("%d", r.chainId)},
 		{"{granularity}", granularity},
 		{"{granularityCamelCase}", capitalize(granularity)},
 	}
 
+	// Bind parameters (native ClickHouse parameter binding for WHERE clauses)
+	bindParams := map[string]interface{}{
+		"chain_id":     r.chainId,
+		"first_period": firstPeriod,
+		"last_period":  lastPeriod,
+	}
+
 	filename := fmt.Sprintf("metrics/%s.sql", metricFile)
-	return executeSQLFile(r.conn, r.sqlDir, filename, params)
+	return executeSQLFile(r.conn, r.sqlDir, filename, templateParams, bindParams)
 }
