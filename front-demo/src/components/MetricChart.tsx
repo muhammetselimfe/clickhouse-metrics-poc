@@ -1,4 +1,6 @@
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useRef, useEffect } from 'react';
+import uPlot from 'uplot';
+import 'uplot/dist/uPlot.min.css';
 
 interface MetricData {
     chain_id: number;
@@ -15,84 +17,132 @@ interface MetricChartProps {
     granularity: string;
 }
 
-interface ChartDataPoint {
-    period: number;
-    value: number;
-    periodLabel: string;
-}
+function formatDate(dateString: string, granularity: string): string {
+    const date = new Date(dateString);
 
-interface CustomTooltipProps {
-    active?: boolean;
-    payload?: Array<{
-        payload: ChartDataPoint;
-        value: number;
-        dataKey: string;
-    }>;
-    label?: number;
-}
-
-function CustomTooltip({ active, payload }: CustomTooltipProps) {
-    if (active && payload && payload.length) {
-        const data = payload[0].payload;
-        return (
-            <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-lg">
-                <p className="text-sm font-semibold text-gray-900 mb-1">{data.periodLabel}</p>
-                <p className="text-sm text-gray-600">
-                    Value: <span className="font-semibold text-blue-600">{data.value.toLocaleString()}</span>
-                </p>
-            </div>
-        );
+    switch (granularity) {
+        case 'hour':
+            return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit' });
+        case 'day':
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        case 'week':
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        case 'month':
+            return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        default:
+            return date.toLocaleDateString('en-US');
     }
-    return null;
+}
+
+function formatMetricName(name: string): string {
+    return name
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
+
+function formatValue(value: number): string {
+    if (value >= 1_000_000_000) {
+        return (value / 1_000_000_000).toFixed(2) + 'B';
+    }
+    if (value >= 1_000_000) {
+        return (value / 1_000_000).toFixed(2) + 'M';
+    }
+    if (value >= 1_000) {
+        return (value / 1_000).toFixed(2) + 'K';
+    }
+    return value.toFixed(0);
 }
 
 function MetricChart({ metricName, data, granularity }: MetricChartProps) {
-    const chartData = data.map((item) => ({
-        period: new Date(item.period).getTime(),
-        value: item.value,
-        periodLabel: formatDate(item.period, granularity),
-    }));
+    const chartRef = useRef<HTMLDivElement>(null);
+    const plotRef = useRef<uPlot | null>(null);
 
-    function formatDate(dateString: string, granularity: string): string {
-        const date = new Date(dateString);
+    useEffect(() => {
+        if (!chartRef.current || !data || data.length === 0) return;
 
-        switch (granularity) {
-            case 'hour':
-                return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit' });
-            case 'day':
-                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            case 'week':
-                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            case 'month':
-                return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-            default:
-                return date.toLocaleDateString('en-US');
-        }
-    }
+        // Prepare data for uPlot
+        const timestamps = data.map(item => new Date(item.period).getTime() / 1000);
+        const values = data.map(item => item.value);
 
-    function formatMetricName(name: string): string {
-        return name
-            .split('_')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(' ');
-    }
+        const opts: uPlot.Options = {
+            width: chartRef.current.offsetWidth,
+            height: 300,
+            padding: [10, 10, 0, 5], // [top, right, bottom, left] - add padding for axes
+            scales: {
+                x: {
+                    time: true,
+                },
+            },
+            series: [
+                {
+                    label: 'Time',
+                },
+                {
+                    label: formatMetricName(metricName),
+                    stroke: '#3b82f6',
+                    width: 2,
+                    fill: 'rgba(59, 130, 246, 0.1)',
+                    points: { show: false },
+                },
+            ],
+            axes: [
+                {
+                    stroke: '#6b7280',
+                    grid: { stroke: '#e5e7eb', width: 1 },
+                    ticks: { stroke: '#e5e7eb' },
+                    values: (_self, ticks) => {
+                        return ticks.map(ts => {
+                            const dateStr = new Date(ts * 1000).toISOString();
+                            return formatDate(dateStr, granularity);
+                        });
+                    },
+                },
+                {
+                    stroke: '#6b7280',
+                    grid: { stroke: '#e5e7eb', width: 1 },
+                    ticks: { stroke: '#e5e7eb' },
+                    values: (_self, ticks) => ticks.map(v => formatValue(v)),
+                    size: 100, // Reserve space for y-axis labels
+                },
+            ],
+            cursor: {
+                drag: {
+                    x: false,
+                    y: false,
+                },
+                points: {
+                    size: 8,
+                    width: 2,
+                },
+            },
+        };
 
-    function formatValue(value: number): string {
-        if (value >= 1_000_000_000) {
-            return (value / 1_000_000_000).toFixed(2) + 'B';
-        }
-        if (value >= 1_000_000) {
-            return (value / 1_000_000).toFixed(2) + 'M';
-        }
-        if (value >= 1_000) {
-            return (value / 1_000).toFixed(2) + 'K';
-        }
-        return value.toFixed(0);
-    }
+        const plotData: uPlot.AlignedData = [timestamps, values];
+        const plot = new uPlot(opts, plotData, chartRef.current);
+        plotRef.current = plot;
+
+        // Handle resize
+        const resizeObserver = new ResizeObserver(() => {
+            if (plotRef.current && chartRef.current) {
+                plotRef.current.setSize({
+                    width: chartRef.current.offsetWidth,
+                    height: 300
+                });
+            }
+        });
+
+        resizeObserver.observe(chartRef.current);
+
+        return () => {
+            resizeObserver.disconnect();
+            plot.destroy();
+        };
+    }, [data, metricName, granularity]);
 
     if (!data || data.length === 0) {
         return (
-            <div className="bg-white rounded-lg shadow p-6">
+            <div className="p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">{formatMetricName(metricName)}</h3>
                 <p className="text-gray-500">No data available</p>
             </div>
@@ -100,42 +150,9 @@ function MetricChart({ metricName, data, granularity }: MetricChartProps) {
     }
 
     return (
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">{formatMetricName(metricName)}</h3>
-            <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={chartData}>
-                    <defs>
-                        <linearGradient id={`color-${metricName}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                        </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis
-                        dataKey="period"
-                        tickFormatter={(value) => {
-                            const item = chartData.find(d => d.period === value);
-                            return item?.periodLabel || '';
-                        }}
-                        stroke="#6b7280"
-                        style={{ fontSize: '12px' }}
-                    />
-                    <YAxis
-                        tickFormatter={formatValue}
-                        stroke="#6b7280"
-                        style={{ fontSize: '12px' }}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Area
-                        type="monotone"
-                        dataKey="value"
-                        stroke="#3b82f6"
-                        strokeWidth={2}
-                        fillOpacity={1}
-                        fill={`url(#color-${metricName})`}
-                    />
-                </AreaChart>
-            </ResponsiveContainer>
+            <div ref={chartRef} className="w-full" />
         </div>
     );
 }

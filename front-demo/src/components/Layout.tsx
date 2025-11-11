@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { BarChart3, FileCode, RefreshCw } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 function Layout() {
   const location = useLocation();
@@ -46,9 +46,7 @@ function Layout() {
 
       {/* Main content */}
       <div className="pt-24 max-w-7xl mx-auto">
-        <AnimatePresence mode="wait">
-          <Outlet key={location.pathname} />
-        </AnimatePresence>
+        <Outlet />
       </div>
     </div>
   );
