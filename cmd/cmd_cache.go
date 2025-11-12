@@ -366,7 +366,7 @@ func runPChainCache(cfg ChainConfig) error {
 	// Track highest block cached for checkpoint
 	var highestBlockMu sync.Mutex
 	highestBlock := startBlock - 1
-	checkpointInterval := int64(1000) // Save checkpoint every 1k blocks
+	checkpointInterval := int64(100000) // Save checkpoint every 10k blocks
 	lastCheckpoint := highestBlock
 
 	for current := startBlock; current <= endBlock; {

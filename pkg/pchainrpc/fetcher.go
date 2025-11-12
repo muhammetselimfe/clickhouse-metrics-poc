@@ -1,14 +1,18 @@
 package pchainrpc
 
 import (
+	"bytes"
 	"clickhouse-metrics-poc/pkg/cache"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 
+	"github.com/ava-labs/avalanchego/utils/rpc"
 	"github.com/ava-labs/avalanchego/vms/platformvm"
 	"github.com/ava-labs/avalanchego/vms/platformvm/block"
 	"github.com/ava-labs/avalanchego/vms/platformvm/txs"
@@ -21,6 +25,81 @@ type FetcherOptions struct {
 	MaxRetries     int           // Maximum number of retries per request
 	RetryDelay     time.Duration // Initial retry delay
 	Cache          *cache.Cache  // Optional cache for complete blocks
+}
+
+// pooledRequester implements EndpointRequester with proper connection pooling
+type pooledRequester struct {
+	uri        string
+	httpClient *http.Client
+}
+
+func newPooledRequester(uri string) *pooledRequester {
+	transport := &http.Transport{
+		MaxIdleConns:        10000,
+		MaxIdleConnsPerHost: 10000,
+		IdleConnTimeout:     90 * time.Second,
+		DisableKeepAlives:   false,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
+
+	return &pooledRequester{
+		uri: uri,
+		httpClient: &http.Client{
+			Timeout:   5 * time.Minute,
+			Transport: transport,
+		},
+	}
+}
+
+func (r *pooledRequester) SendRequest(ctx context.Context, method string, params interface{}, reply interface{}, options ...rpc.Option) error {
+	reqBody := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  method,
+		"params":  params,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", r.uri+"/ext/P", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to issue request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var rpcResp struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if rpcResp.Error != nil {
+		return fmt.Errorf("rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+
+	if err := json.Unmarshal(rpcResp.Result, reply); err != nil {
+		return fmt.Errorf("failed to unmarshal result: %w", err)
+	}
+
+	return nil
 }
 
 type Fetcher struct {
@@ -49,8 +128,14 @@ func NewFetcher(opts FetcherOptions) *Fetcher {
 		opts.RetryDelay = 500 * time.Millisecond
 	}
 
+	// Create client with custom HTTP connection pooling
+	requester := newPooledRequester(opts.RpcURL)
+	client := &platformvm.Client{
+		Requester: requester,
+	}
+
 	f := &Fetcher{
-		client:     platformvm.NewClient(opts.RpcURL),
+		client:     client,
 		rpcURL:     opts.RpcURL,
 		batchSize:  opts.BatchSize,
 		maxRetries: opts.MaxRetries,
