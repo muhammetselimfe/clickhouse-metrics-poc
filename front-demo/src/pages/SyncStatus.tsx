@@ -16,6 +16,12 @@ interface ChainSyncData {
   watermark_block: number | null;
 }
 
+interface TableSize {
+  table: string;
+  size_bytes: number;
+  rows: number;
+}
+
 function SyncStatus() {
   const { data: chains, isLoading, error, refetch, isFetching } = useQuery<ChainSyncData[]>({
     queryKey: ['syncStatus'],
@@ -36,6 +42,29 @@ function SyncStatus() {
       });
       const data = await result.json<ChainSyncData>();
       return data as ChainSyncData[];
+    },
+    refetchInterval: 60000,
+  });
+
+  const { data: tableSizes, isLoading: isLoadingTables, error: tableSizesError } = useQuery<TableSize[]>({
+    queryKey: ['tableSizes'],
+    queryFn: async () => {
+      const result = await clickhouse.query({
+        query: `
+          SELECT 
+            table,
+            sum(bytes) as size_bytes,
+            sum(rows) as rows
+          FROM system.parts
+          WHERE active
+              AND database = currentDatabase()
+          GROUP BY table
+          ORDER BY sum(bytes) DESC
+        `,
+        format: 'JSONEachRow',
+      });
+      const data = await result.json<TableSize>();
+      return data as TableSize[];
     },
     refetchInterval: 60000,
   });
@@ -77,6 +106,21 @@ function SyncStatus() {
     };
     return colors[health as keyof typeof colors] || colors.gray;
   };
+
+  const formatBytes = (bytes: number): string => {
+    const gb = bytes / (1024 * 1024 * 1024);
+    return `${gb.toFixed(3)} GB`;
+  };
+
+  const formatBytesPerRow = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes.toFixed(0)} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  };
+
+  const totalRows = tableSizes?.reduce((sum, table) => sum + table.rows, 0) || 0;
+  const totalBytes = tableSizes?.reduce((sum, table) => sum + table.size_bytes, 0) || 0;
 
   return (
     <PageTransition>
@@ -212,6 +256,96 @@ function SyncStatus() {
             <p className="text-gray-600">No chains found in the database.</p>
           </div>
         )}
+
+        {/* Table Sizes */}
+        <div className="mt-8">
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">Database Table Sizes</h2>
+          {isLoadingTables && (
+            <div className="bg-white rounded-lg shadow p-8 text-center">
+              <p className="text-gray-600">Loading table sizes...</p>
+            </div>
+          )}
+
+          {tableSizesError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+              <h3 className="text-sm font-semibold text-red-900 mb-1">Error Loading Table Sizes</h3>
+              <p className="text-sm text-red-700">{tableSizesError.message}</p>
+            </div>
+          )}
+
+          {tableSizes && tableSizes.length > 0 && (
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      Table Name
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      Rows
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      Size
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                      Bytes/Row
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {tableSizes.map((table, idx) => {
+                    const bytesPerRow = table.rows > 0 ? table.size_bytes / table.rows : 0;
+                    return (
+                      <tr
+                        key={table.table}
+                        className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{table.table}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <div className="text-sm text-gray-900">
+                            {table.rows.toLocaleString()}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <div className="text-sm font-medium text-gray-900">
+                            {formatBytes(table.size_bytes)}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <div className="text-sm text-gray-600">
+                            {formatBytesPerRow(bytesPerRow)}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="bg-gray-100 border-t-2 border-gray-300">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-bold text-gray-900">TOTAL</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <div className="text-sm font-bold text-gray-900">
+                        {totalRows.toLocaleString()}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <div className="text-sm font-bold text-gray-900">
+                        {formatBytes(totalBytes)}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <div className="text-sm font-bold text-gray-600">
+                        {formatBytesPerRow(totalRows > 0 ? totalBytes / totalRows : 0)}
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </PageTransition>
   );
