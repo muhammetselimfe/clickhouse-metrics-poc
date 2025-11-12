@@ -2,6 +2,9 @@
 CREATE ROLE IF NOT EXISTS frontend_reader;
 GRANT SELECT ON default.* TO frontend_reader;
 GRANT SHOW ON *.* TO frontend_reader;
+GRANT SELECT ON system.parts TO frontend_reader;
+GRANT SELECT ON system.tables TO frontend_reader;
+GRANT SELECT ON system.columns TO frontend_reader;
 
 -- === Profiles ===
 
