@@ -5,6 +5,7 @@ import (
 	"clickhouse-metrics-poc/pkg/cache"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"sort"
@@ -15,6 +16,8 @@ import (
 
 type FetcherOptions struct {
 	RpcURL           string
+	ChainID          uint32           // Chain ID for logging
+	ChainName        string           // Chain name for logging
 	MaxConcurrency   int              // Maximum concurrent RPC and debug requests
 	BatchSize        int              // Number of requests per batch
 	DebugBatchSize   int              // Number of debug requests per batch
@@ -26,6 +29,8 @@ type FetcherOptions struct {
 
 type Fetcher struct {
 	rpcURL         string
+	chainID        uint32
+	chainName      string
 	batchSize      int
 	debugBatchSize int
 	maxRetries     int
@@ -91,6 +96,8 @@ func NewFetcher(opts FetcherOptions) *Fetcher {
 
 	f := &Fetcher{
 		rpcURL:         opts.RpcURL,
+		chainID:        opts.ChainID,
+		chainName:      opts.ChainName,
 		batchSize:      opts.BatchSize,
 		debugBatchSize: opts.DebugBatchSize,
 		maxRetries:     opts.MaxRetries,
@@ -867,7 +874,7 @@ func (f *Fetcher) fetchTracesBatch(from, to int64, txInfos []txInfo) (map[string
 					if delay > 10*time.Second {
 						delay = 10 * time.Second
 					}
-					fmt.Printf("Retrying trace batch %d (attempt %d/%d) after %v\n", idx, attempt, f.maxRetries, delay)
+					log.Printf("[Chain %d - %s] Retrying trace batch %d (attempt %d/%d) after %v\n", f.chainID, f.chainName, idx, attempt, f.maxRetries, delay)
 					time.Sleep(delay)
 				}
 

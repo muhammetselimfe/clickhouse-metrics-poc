@@ -86,6 +86,8 @@ func runEVMCache(cfg ChainConfig) error {
 		cfg.ChainID, cfg.Name, maxConcurrency, fetchBatchSize)
 	fetcher := evmrpc.NewFetcher(evmrpc.FetcherOptions{
 		RpcURL:         cfg.RpcURL,
+		ChainID:        cfg.ChainID,
+		ChainName:      cfg.Name,
 		MaxConcurrency: maxConcurrency,
 		MaxRetries:     100,
 		RetryDelay:     100 * time.Millisecond,
