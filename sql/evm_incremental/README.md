@@ -2,21 +2,16 @@
 
 This directory contains block-based incremental indexers that process blockchain data continuously as new blocks arrive. Unlike granular metrics (which are time-based), incremental indexers use block numbers for watermarking.
 
-## Two Types of Incremental Indexers
+## Incremental Indexing System
 
-### 1. Batched (`batched/`)
-- **Throttle**: Runs maximum once per 5 minutes (wall time)
-- **Use case**: Heavy indexing operations that don't need real-time updates
-- **Examples**: Cross-chain address tracking, contract metadata extraction
-
-### 2. Immediate (`immediate/`)
-- **Throttle**: Runs every batch with minimum 0.9 seconds spacing
-- **Use case**: Near real-time indexing that needs to be current
-- **Examples**: Live leaderboards, active user tracking
+- **Throttle**: All indexers run with minimum 0.9 seconds spacing between runs
+- **Batch limit**: Processes up to 20,000 blocks per run
+- **Use case**: Continuous, near real-time indexing of blockchain data
+- **Examples**: Address tracking, contract deployments, token balances
 
 ## Template Placeholders
 
-The indexer runner (`pkg/indexer/incremental.go`) replaces these placeholders:
+The indexer runner (`pkg/evmindexer/incremental.go`) replaces these placeholders:
 
 | Placeholder | Description | Example Replacement |
 |------------|-------------|---------------------|
@@ -78,13 +73,11 @@ WHERE chain_id = 43114
   AND indexer_name LIKE 'incremental/%'
 ```
 
-Watermark pattern:
-- Batched: `incremental/batched/indexer_name`
-- Immediate: `incremental/immediate/indexer_name`
+Watermark pattern: `incremental/{indexer_name}`
 
 ## Example: Cross-Chain Address Tracking
 
-See `batched/address_on_chain.sql`:
+See `address_on_chain.sql`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS address_on_chain (
@@ -121,26 +114,13 @@ WHERE address IS NOT NULL;
 
 ## Adding New Incremental Indexers
 
-1. Choose type: batched (5min) or immediate (0.9s)
-2. Create `indexer_name.sql` in appropriate directory
-3. Use `{chain_id:UInt32}`, `{first_block:UInt64}`, `{last_block:UInt64}` placeholders
-4. Filter by `block_number >= {first_block:UInt64} AND block_number <= {last_block:UInt64}`
-5. Use ReplacingMergeTree for idempotency
-6. Restart indexer runner - auto-discovers new files
+1. Create `indexer_name.sql` in `sql/evm_incremental/` directory
+2. Use `{chain_id:UInt32}`, `{first_block:UInt64}`, `{last_block:UInt64}` placeholders
+3. Filter by `block_number >= {first_block:UInt64} AND block_number <= {last_block:UInt64}`
+4. Use ReplacingMergeTree for idempotency
+5. Restart indexer runner - auto-discovers new files
 
-## Batched vs Immediate: When to Use
-
-**Use Batched (5min throttle) when:**
-- Indexing is computationally expensive
-- Real-time updates aren't critical
-- Building large lookup tables
-- Cross-referencing multiple chains
-
-**Use Immediate (0.9s throttle) when:**
-- Near real-time data is needed
-- Indexing is lightweight
-- Powering live dashboards
-- Tracking active users/contracts
+All indexers run with 0.9 second minimum interval and process up to 20,000 blocks per batch.
 
 ## Querying Incremental Indexers
 
@@ -156,7 +136,7 @@ WHERE address = unhex('742d35Cc6634C0532925a3b844Bc9e7595f0bEb');
 SELECT last_block_num 
 FROM indexer_watermarks FINAL
 WHERE chain_id = 43114 
-  AND indexer_name = 'incremental/batched/address_on_chain';
+  AND indexer_name = 'incremental/address_on_chain';
 ```
 
 ## Important Notes

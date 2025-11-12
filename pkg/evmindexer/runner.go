@@ -31,9 +31,8 @@ type IndexRunner struct {
 	lastRunTime map[string]time.Time
 
 	// Discovered indexers (loaded once at startup)
-	granularMetrics   []string
-	batchedIndexers   []string
-	immediateIndexers []string
+	granularMetrics    []string
+	incrementalIndexers []string
 }
 
 // NewIndexRunner creates a new indexer runner for a single chain
@@ -71,8 +70,8 @@ func NewIndexRunner(chainId uint32, conn driver.Conn, sqlDir string) (*IndexRunn
 		return nil, fmt.Errorf("failed to load watermarks: %w", err)
 	}
 
-	fmt.Printf("[Chain %d] IndexRunner initialized - %d granular metrics, %d batched, %d immediate indexers\n",
-		chainId, len(runner.granularMetrics), len(runner.batchedIndexers), len(runner.immediateIndexers))
+	fmt.Printf("[Chain %d] IndexRunner initialized - %d granular metrics, %d incremental indexers\n",
+		chainId, len(runner.granularMetrics), len(runner.incrementalIndexers))
 
 	return runner, nil
 }
@@ -87,14 +86,8 @@ func (r *IndexRunner) discoverIndexers() error {
 		return err
 	}
 
-	// Discover batched incrementals
-	r.batchedIndexers, err = discoverSQLFiles(filepath.Join(r.sqlDir, "evm_incremental/batched"))
-	if err != nil {
-		return err
-	}
-
-	// Discover immediate incrementals
-	r.immediateIndexers, err = discoverSQLFiles(filepath.Join(r.sqlDir, "evm_incremental/immediate"))
+	// Discover incremental indexers
+	r.incrementalIndexers, err = discoverSQLFiles(filepath.Join(r.sqlDir, "evm_incremental"))
 	if err != nil {
 		return err
 	}
@@ -128,9 +121,6 @@ func (r *IndexRunner) processAllIndexers() {
 	// 1. Granular metrics (time-based, period-driven)
 	r.processGranularMetrics()
 
-	// 2. Batched incrementals (block-based, 5min throttle)
-	r.processBatchedIncrementals()
-
-	// 3. Immediate incrementals (block-based, 0.9s throttle)
-	r.processImmediateIncrementals()
+	// 2. Incremental indexers (block-based, 0.9s throttle)
+	r.processIncrementals()
 }

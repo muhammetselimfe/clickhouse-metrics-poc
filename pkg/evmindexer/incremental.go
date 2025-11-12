@@ -6,17 +6,16 @@ import (
 )
 
 const (
-	batchedMinInterval   = 5 * time.Minute
-	immediateMinInterval = 900 * time.Millisecond
+	incrementalMinInterval = 900 * time.Millisecond
 )
 
-// processBatchedIncrementals checks and runs batched incremental indexers
-func (r *IndexRunner) processBatchedIncrementals() {
-	for _, indexerFile := range r.batchedIndexers {
-		indexerName := fmt.Sprintf("evm_incremental/batched/%s", indexerFile)
+// processIncrementals checks and runs all incremental indexers
+func (r *IndexRunner) processIncrementals() {
+	for _, indexerFile := range r.incrementalIndexers {
+		indexerName := fmt.Sprintf("incremental/%s", indexerFile)
 
 		// Check throttle
-		if !r.shouldRun(indexerName, batchedMinInterval) {
+		if !r.shouldRun(indexerName, incrementalMinInterval) {
 			continue
 		}
 
@@ -32,52 +31,7 @@ func (r *IndexRunner) processBatchedIncrementals() {
 			continue
 		}
 
-		// Run indexer
-		fmt.Printf("[Chain %d] Running %s - blocks %d to %d\n",
-			r.chainId, indexerName, watermark.LastBlockNum+1, r.latestBlockNum)
-
-		start := time.Now()
-		if err := r.runIncrementalIndexer(indexerFile, "batched", watermark.LastBlockNum+1, r.latestBlockNum); err != nil {
-			fmt.Printf("[Chain %d] FATAL: Failed to run %s: %v\n", r.chainId, indexerName, err)
-			panic(err)
-		}
-		elapsed := time.Since(start)
-		fmt.Printf("[Chain %d] %s - blocks %d to %d - time taken: %s\n",
-			r.chainId, indexerName, watermark.LastBlockNum+1, r.latestBlockNum, elapsed)
-
-		// Update watermark and last run time
-		watermark.LastBlockNum = r.latestBlockNum
-		if err := r.saveWatermark(indexerName, watermark); err != nil {
-			fmt.Printf("[Chain %d] FATAL: Failed to save watermark for %s: %v\n", r.chainId, indexerName, err)
-			panic(err)
-		}
-		r.lastRunTime[indexerName] = time.Now()
-	}
-}
-
-// processImmediateIncrementals checks and runs immediate incremental indexers
-func (r *IndexRunner) processImmediateIncrementals() {
-	for _, indexerFile := range r.immediateIndexers {
-		indexerName := fmt.Sprintf("incremental/immediate/%s", indexerFile)
-
-		// Check throttle
-		if !r.shouldRun(indexerName, immediateMinInterval) {
-			continue
-		}
-
-		watermark := r.getWatermark(indexerName)
-
-		// Initialize to block 1 if never run
-		if watermark.LastBlockNum == 0 {
-			watermark.LastBlockNum = 1
-		}
-
-		// Check if we have new blocks
-		if r.latestBlockNum <= watermark.LastBlockNum {
-			continue
-		}
-
-		// Limit to 10k blocks at a time
+		// Limit to 20k blocks at a time
 		endBlock := r.latestBlockNum
 		const maxBlocks = 20000
 		if endBlock-watermark.LastBlockNum > maxBlocks {
@@ -89,7 +43,7 @@ func (r *IndexRunner) processImmediateIncrementals() {
 			r.chainId, indexerName, watermark.LastBlockNum+1, endBlock)
 
 		start := time.Now()
-		if err := r.runIncrementalIndexer(indexerFile, "immediate", watermark.LastBlockNum+1, endBlock); err != nil {
+		if err := r.runIncrementalIndexer(indexerFile, watermark.LastBlockNum+1, endBlock); err != nil {
 			fmt.Printf("[Chain %d] FATAL: Failed to run %s: %v\n", r.chainId, indexerName, err)
 			panic(err)
 		}
@@ -108,7 +62,7 @@ func (r *IndexRunner) processImmediateIncrementals() {
 }
 
 // runIncrementalIndexer executes an incremental indexer for given block range
-func (r *IndexRunner) runIncrementalIndexer(indexerFile string, indexerType string, firstBlock, lastBlock uint64) error {
+func (r *IndexRunner) runIncrementalIndexer(indexerFile string, firstBlock, lastBlock uint64) error {
 	// Template parameters (string replacement for SELECT clauses)
 	templateParams := []struct{ key, value string }{
 		{"{chain_id}", fmt.Sprintf("%d", r.chainId)},
@@ -121,7 +75,7 @@ func (r *IndexRunner) runIncrementalIndexer(indexerFile string, indexerType stri
 		"last_block":  lastBlock,
 	}
 
-	filename := fmt.Sprintf("evm_incremental/%s/%s.sql", indexerType, indexerFile)
+	filename := fmt.Sprintf("evm_incremental/%s.sql", indexerFile)
 	return executeSQLFile(r.conn, r.sqlDir, filename, templateParams, bindParams)
 }
 
