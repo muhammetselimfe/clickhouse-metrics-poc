@@ -21,13 +21,13 @@ func nodeIDToBytes(id ids.NodeID) []byte {
 }
 
 // InsertPChainTxs inserts P-chain transaction data into the p_chain_txs table
-func InsertPChainTxs(ctx context.Context, conn clickhouse.Conn, blocks []*pchainrpc.NormalizedBlock) error {
+func InsertPChainTxs(ctx context.Context, conn clickhouse.Conn, pchainID uint32, blocks []*pchainrpc.NormalizedBlock) error {
 	if len(blocks) == 0 {
 		return nil
 	}
 
 	batch, err := conn.PrepareBatch(ctx, `INSERT INTO p_chain_txs (
-		tx_id, tx_type, block_number, block_time,
+		tx_id, tx_type, block_number, block_time, p_chain_id,
 		node_id, start_time, end_time, weight,
 		subnet_id, chain_id,
 		address, validators,
@@ -179,6 +179,7 @@ func InsertPChainTxs(ctx context.Context, conn clickhouse.Conn, blocks []*pchain
 				tx.TxType,
 				tx.BlockHeight,
 				tx.BlockTime,
+				pchainID,
 				nodeID,
 				tx.StartTime,
 				tx.EndTime,

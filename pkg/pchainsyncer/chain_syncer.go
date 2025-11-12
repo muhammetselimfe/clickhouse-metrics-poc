@@ -18,22 +18,24 @@ const (
 	BufferSize = 10000
 	// FlushInterval is how often to flush blocks to ClickHouse
 	FlushInterval = 1 * time.Second
-	// PChainID is the chain ID used for P-chain (0 for P-chain)
-	PChainID = uint32(0)
 )
 
 // Config holds configuration for PChainSyncer
 type Config struct {
+	ChainID        uint32
 	RpcURL         string
 	StartBlock     int64        // Starting block number when no watermark exists
 	MaxConcurrency int          // Maximum concurrent RPC requests
 	FetchBatchSize int          // Blocks per fetch
 	CHConn         driver.Conn  // ClickHouse connection
 	Cache          *cache.Cache // Cache for RPC calls
+	Name           string       // Chain name for display
 }
 
 // PChainSyncer manages P-chain sync
 type PChainSyncer struct {
+	chainID        uint32
+	chainName      string
 	fetcher        *pchainrpc.Fetcher
 	conn           driver.Conn
 	blockChan      chan []*pchainrpc.NormalizedBlock // Bounded channel for backpressure
@@ -65,6 +67,9 @@ func NewPChainSyncer(cfg Config) (*PChainSyncer, error) {
 	if cfg.StartBlock == 0 {
 		cfg.StartBlock = 1
 	}
+	if cfg.Name == "" {
+		cfg.Name = fmt.Sprintf("P-Chain-%d", cfg.ChainID)
+	}
 
 	// Create fetcher
 	fetcher := pchainrpc.NewFetcher(pchainrpc.FetcherOptions{
@@ -79,6 +84,8 @@ func NewPChainSyncer(cfg Config) (*PChainSyncer, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	ps := &PChainSyncer{
+		chainID:        cfg.ChainID,
+		chainName:      cfg.Name,
 		fetcher:        fetcher,
 		conn:           cfg.CHConn,
 		blockChan:      make(chan []*pchainrpc.NormalizedBlock, BufferSize),
@@ -96,7 +103,7 @@ func NewPChainSyncer(cfg Config) (*PChainSyncer, error) {
 
 // Start begins syncing
 func (ps *PChainSyncer) Start() error {
-	log.Printf("[P-Chain] Starting syncer...")
+	log.Printf("[Chain %d - %s] Starting syncer...", ps.chainID, ps.chainName)
 
 	// Get starting position
 	startBlock, err := ps.getStartingBlock()
@@ -104,7 +111,7 @@ func (ps *PChainSyncer) Start() error {
 		return fmt.Errorf("failed to determine starting block: %w", err)
 	}
 
-	log.Printf("[P-Chain] Starting from block %d", startBlock)
+	log.Printf("[Chain %d - %s] Starting from block %d", ps.chainID, ps.chainName, startBlock)
 
 	// Get latest block from RPC
 	latestBlock, err := ps.fetcher.GetLatestBlock()
@@ -112,10 +119,10 @@ func (ps *PChainSyncer) Start() error {
 		return fmt.Errorf("failed to get latest block: %w", err)
 	}
 
-	log.Printf("[P-Chain] Latest block on chain: %d", latestBlock)
+	log.Printf("[Chain %d - %s] Latest block on chain: %d", ps.chainID, ps.chainName, latestBlock)
 
-	// Initialize chain status in database (using chain ID 0 for P-chain)
-	if err := chwrapper.UpsertChainStatus(ps.conn, PChainID, "P-Chain", uint64(latestBlock)); err != nil {
+	// Initialize chain status in database
+	if err := chwrapper.UpsertChainStatus(ps.conn, ps.chainID, ps.chainName, uint64(latestBlock)); err != nil {
 		return fmt.Errorf("failed to upsert chain status: %w", err)
 	}
 
@@ -136,11 +143,11 @@ func (ps *PChainSyncer) Start() error {
 
 // Stop gracefully shuts down the syncer
 func (ps *PChainSyncer) Stop() {
-	log.Printf("[P-Chain] Stopping syncer...")
+	log.Printf("[Chain %d - %s] Stopping syncer...", ps.chainID, ps.chainName)
 	ps.cancel()
 	close(ps.blockChan)
 	ps.wg.Wait()
-	log.Printf("[P-Chain] Syncer stopped")
+	log.Printf("[Chain %d - %s] Syncer stopped", ps.chainID, ps.chainName)
 }
 
 // Wait blocks until syncer completes
@@ -150,8 +157,8 @@ func (ps *PChainSyncer) Wait() {
 
 // getStartingBlock determines where to start syncing from
 func (ps *PChainSyncer) getStartingBlock() (int64, error) {
-	// Get watermark (using chain ID 0 for P-chain)
-	watermark, err := chwrapper.GetWatermark(ps.conn, PChainID)
+	// Get watermark
+	watermark, err := chwrapper.GetWatermark(ps.conn, ps.chainID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get watermark: %w", err)
 	}
@@ -184,13 +191,13 @@ func (ps *PChainSyncer) fetcherLoop(startBlock, latestBlock int64) {
 
 				newLatest, err := ps.fetcher.GetLatestBlock()
 				if err != nil {
-					log.Printf("[P-Chain] Error getting latest block: %v", err)
+					log.Printf("[Chain %d - %s] Error getting latest block: %v", ps.chainID, ps.chainName, err)
 					continue
 				}
 
 				// Update chain status with latest block from RPC
-				if err := chwrapper.UpdateLatestBlock(ps.conn, PChainID, "P-Chain", uint64(newLatest)); err != nil {
-					log.Printf("[P-Chain] Error updating chain status: %v", err)
+				if err := chwrapper.UpdateLatestBlock(ps.conn, ps.chainID, ps.chainName, uint64(newLatest)); err != nil {
+					log.Printf("[Chain %d - %s] Error updating chain status: %v", ps.chainID, ps.chainName, err)
 				}
 
 				if newLatest > latestBlock {
@@ -209,8 +216,8 @@ func (ps *PChainSyncer) fetcherLoop(startBlock, latestBlock int64) {
 			// Fetch blocks
 			blocks, err := ps.fetcher.FetchBlockRange(currentBlock, endBlock)
 			if err != nil {
-				log.Printf("[P-Chain] Error fetching blocks %d-%d: %v",
-					currentBlock, endBlock, err)
+				log.Printf("[Chain %d - %s] Error fetching blocks %d-%d: %v",
+					ps.chainID, ps.chainName, currentBlock, endBlock, err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
@@ -309,7 +316,7 @@ func (ps *PChainSyncer) writeBlocks(blocks []*pchainrpc.NormalizedBlock) error {
 	start := time.Now()
 
 	// Insert transactions
-	if err := InsertPChainTxs(ps.ctx, ps.conn, blocks); err != nil {
+	if err := InsertPChainTxs(ps.ctx, ps.conn, ps.chainID, blocks); err != nil {
 		return fmt.Errorf("failed to insert P-chain txs: %w", err)
 	}
 
@@ -318,7 +325,7 @@ func (ps *PChainSyncer) writeBlocks(blocks []*pchainrpc.NormalizedBlock) error {
 	for _, b := range blocks {
 		txCount += len(b.Transactions)
 	}
-	log.Printf("[P-Chain] Inserted %d blocks and %d txs in %v", len(blocks), txCount, elapsed)
+	log.Printf("[Chain %d - %s] Inserted %d blocks and %d txs in %v", ps.chainID, ps.chainName, len(blocks), txCount, elapsed)
 
 	// Update watermark to the highest block number in this batch
 	maxBlock := uint64(0)
@@ -329,7 +336,7 @@ func (ps *PChainSyncer) writeBlocks(blocks []*pchainrpc.NormalizedBlock) error {
 	}
 
 	if maxBlock > ps.watermark {
-		if err := chwrapper.SetWatermark(ps.conn, PChainID, uint32(maxBlock)); err != nil {
+		if err := chwrapper.SetWatermark(ps.conn, ps.chainID, uint32(maxBlock)); err != nil {
 			return fmt.Errorf("failed to update watermark: %w", err)
 		}
 		ps.watermark = maxBlock
@@ -360,8 +367,8 @@ func (ps *PChainSyncer) printProgress() {
 			writeRate := float64(written) / elapsed.Seconds()
 			lag := fetched - written
 
-			log.Printf("[P-Chain] Fetched: %d (%.1f/s) | Written: %d (%.1f/s) | Lag: %d | Watermark: %d",
-				fetched, fetchRate, written, writeRate, lag, ps.watermark)
+			log.Printf("[Chain %d - %s] Fetched: %d (%.1f/s) | Written: %d (%.1f/s) | Lag: %d | Watermark: %d",
+				ps.chainID, ps.chainName, fetched, fetchRate, written, writeRate, lag, ps.watermark)
 		}
 	}
 }

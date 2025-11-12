@@ -21,22 +21,22 @@ SETTINGS index_granularity = 1024;
 INSERT INTO address_on_chain (address, chain_id)
 SELECT DISTINCT
     address,
-    {chain_id:UInt32} as chain_id
+    {chain_id} as chain_id
 FROM (
     SELECT from as address
     FROM raw_traces
-    WHERE chain_id = {chain_id:UInt32}
-      AND block_number >= {first_block:UInt64}
-      AND block_number <= {last_block:UInt64}
+    WHERE chain_id = @chain_id
+      AND block_number >= @first_block
+      AND block_number <= @last_block
       AND from != unhex('0000000000000000000000000000000000000000')
     
     UNION ALL
     
     SELECT to as address
     FROM raw_traces
-    WHERE chain_id = {chain_id:UInt32}
-      AND block_number >= {first_block:UInt64}
-      AND block_number <= {last_block:UInt64}
+    WHERE chain_id = @chain_id
+      AND block_number >= @first_block
+      AND block_number <= @last_block
       AND to IS NOT NULL
       AND to != unhex('0000000000000000000000000000000000000000')
 )

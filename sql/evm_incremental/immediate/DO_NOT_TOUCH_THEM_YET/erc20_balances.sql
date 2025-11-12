@@ -48,9 +48,9 @@ FROM (
         log_index,
         CAST(reinterpretAsUInt256(reverse(data)) AS Int256) as delta
     FROM raw_logs
-    WHERE chain_id = {chain_id:UInt32}
-      AND block_number >= {first_block:UInt64}
-      AND block_number <= {last_block:UInt64}
+    WHERE chain_id = @chain_id
+      AND block_number >= @first_block
+      AND block_number <= @last_block
       AND topic0 = unhex('ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef')
       AND length(data) = 32
       AND topic2 IS NOT NULL
@@ -67,9 +67,9 @@ FROM (
         log_index,
         -CAST(reinterpretAsUInt256(reverse(data)) AS Int256) as delta
     FROM raw_logs
-    WHERE chain_id = {chain_id:UInt32}
-      AND block_number >= {first_block:UInt64}
-      AND block_number <= {last_block:UInt64}
+    WHERE chain_id = @chain_id
+      AND block_number >= @first_block
+      AND block_number <= @last_block
       AND topic0 = unhex('ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef')
       AND length(data) = 32
       AND topic1 IS NOT NULL
@@ -87,8 +87,8 @@ WITH
 affected_pairs AS (
     SELECT DISTINCT wallet, token 
     FROM erc20_deltas FINAL
-    WHERE block_number >= {first_block:UInt64}
-      AND block_number <= {last_block:UInt64}
+    WHERE block_number >= @first_block
+      AND block_number <= @last_block
 ),
 -- Get the starting balance for each affected pair
 -- Use argMax to avoid correlated subquery
@@ -104,7 +104,7 @@ starting_balances AS (
     LEFT JOIN (
         SELECT wallet, token, block_number, balance
         FROM erc20_balances FINAL
-        WHERE block_number < {first_block:UInt64}
+        WHERE block_number < @first_block
     ) eb ON eb.wallet = ap.wallet AND eb.token = ap.token
     GROUP BY ap.wallet, ap.token
 ),
@@ -131,8 +131,8 @@ block_balances AS (
             sum(delta) as delta
         FROM erc20_deltas FINAL
         WHERE (wallet, token) IN (SELECT wallet, token FROM affected_pairs)
-          AND block_number >= {first_block:UInt64}
-          AND block_number <= {last_block:UInt64}
+          AND block_number >= @first_block
+          AND block_number <= @last_block
         GROUP BY wallet, token, block_number
     ) d
     JOIN starting_balances sb ON d.wallet = sb.wallet AND d.token = sb.token

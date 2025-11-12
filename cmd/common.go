@@ -1,0 +1,91 @@
+package cmd
+
+import (
+	"clickhouse-metrics-poc/pkg/cache"
+	"clickhouse-metrics-poc/pkg/evmsyncer"
+	"clickhouse-metrics-poc/pkg/pchainsyncer"
+	"fmt"
+	"os"
+
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"gopkg.in/yaml.v3"
+)
+
+// ChainConfig represents configuration for any blockchain VM type
+type ChainConfig struct {
+	ChainID        uint32 `yaml:"chainID"`
+	VM             string `yaml:"vm"` // "evm", "p", "x", etc.
+	RpcURL         string `yaml:"rpcURL"`
+	StartBlock     int64  `yaml:"startBlock"`
+	FetchBatchSize int    `yaml:"fetchBatchSize"`
+	MaxConcurrency int    `yaml:"maxConcurrency"`
+	Name           string `yaml:"name"`
+}
+
+// Syncer interface for all chain syncers
+type Syncer interface {
+	Start() error
+	Wait()
+	Stop()
+}
+
+// LoadConfig loads and parses the YAML configuration file
+func LoadConfig(path string) ([]ChainConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var configs []ChainConfig
+	if err := yaml.Unmarshal(data, &configs); err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Validate configurations
+	for i, cfg := range configs {
+		if cfg.ChainID == 0 && cfg.VM != "p" {
+			return nil, fmt.Errorf("chain at index %d: chainID cannot be 0 for non-P-chain VMs", i)
+		}
+		if cfg.VM == "" {
+			return nil, fmt.Errorf("chain at index %d: VM type is required", i)
+		}
+		if cfg.RpcURL == "" {
+			return nil, fmt.Errorf("chain at index %d: rpcURL is required", i)
+		}
+		if cfg.Name == "" {
+			return nil, fmt.Errorf("chain at index %d: name is required", i)
+		}
+	}
+
+	return configs, nil
+}
+
+// CreateSyncer creates the appropriate syncer based on VM type
+func CreateSyncer(cfg ChainConfig, conn driver.Conn, cacheInstance *cache.Cache) (Syncer, error) {
+	switch cfg.VM {
+	case "evm":
+		return evmsyncer.NewChainSyncer(evmsyncer.Config{
+			ChainID:        cfg.ChainID,
+			RpcURL:         cfg.RpcURL,
+			StartBlock:     cfg.StartBlock,
+			MaxConcurrency: cfg.MaxConcurrency,
+			CHConn:         conn,
+			Cache:          cacheInstance,
+			FetchBatchSize: cfg.FetchBatchSize,
+			Name:           cfg.Name,
+		})
+
+	case "p":
+		return pchainsyncer.NewPChainSyncer(pchainsyncer.Config{
+			RpcURL:         cfg.RpcURL,
+			StartBlock:     cfg.StartBlock,
+			MaxConcurrency: cfg.MaxConcurrency,
+			FetchBatchSize: cfg.FetchBatchSize,
+			CHConn:         conn,
+			Cache:          cacheInstance,
+		})
+
+	default:
+		return nil, fmt.Errorf("unsupported VM type: %s", cfg.VM)
+	}
+}

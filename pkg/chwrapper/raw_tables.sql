@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS p_chain_txs (
     tx_type LowCardinality(String),
     block_number UInt64,
     block_time DateTime64(3, 'UTC'),
+    p_chain_id UInt32,  -- Identifies which P-chain instance (e.g., mainnet vs testnet)
     
     -- Validator fields (nullable, used by AddValidator, AddDelegator, etc.)
     node_id Nullable(FixedString(20)),
@@ -189,5 +190,5 @@ CREATE TABLE IF NOT EXISTS p_chain_txs (
     -- AdvanceTimeTx
     time Nullable(UInt64)  -- Unix time this block proposes increasing the timestamp to
 ) ENGINE = MergeTree()
-ORDER BY (block_time, block_number, tx_type);
+ORDER BY (p_chain_id, block_time, block_number, tx_type);
 

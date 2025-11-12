@@ -13,7 +13,7 @@ const (
 // processBatchedIncrementals checks and runs batched incremental indexers
 func (r *IndexRunner) processBatchedIncrementals() {
 	for _, indexerFile := range r.batchedIndexers {
-		indexerName := fmt.Sprintf("incremental/batched/%s", indexerFile)
+		indexerName := fmt.Sprintf("evm_incremental/batched/%s", indexerFile)
 
 		// Check throttle
 		if !r.shouldRun(indexerName, batchedMinInterval) {
@@ -109,17 +109,19 @@ func (r *IndexRunner) processImmediateIncrementals() {
 
 // runIncrementalIndexer executes an incremental indexer for given block range
 func (r *IndexRunner) runIncrementalIndexer(indexerFile string, indexerType string, firstBlock, lastBlock uint64) error {
-	// No template parameters for incrementals
-	templateParams := []struct{ key, value string }{}
+	// Template parameters (string replacement for SELECT clauses)
+	templateParams := []struct{ key, value string }{
+		{"{chain_id}", fmt.Sprintf("%d", r.chainId)},
+	}
 
-	// Bind parameters (native ClickHouse parameter binding)
+	// Bind parameters (native ClickHouse parameter binding for WHERE clauses)
 	bindParams := map[string]interface{}{
 		"chain_id":    r.chainId,
 		"first_block": firstBlock,
 		"last_block":  lastBlock,
 	}
 
-	filename := fmt.Sprintf("incremental/%s/%s.sql", indexerType, indexerFile)
+	filename := fmt.Sprintf("evm_incremental/%s/%s.sql", indexerType, indexerFile)
 	return executeSQLFile(r.conn, r.sqlDir, filename, templateParams, bindParams)
 }
 

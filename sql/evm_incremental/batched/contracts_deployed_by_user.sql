@@ -20,15 +20,15 @@ SETTINGS index_granularity = 1024;
 -- Uses tx_from instead of from to get the actual user, not the factory contract.
 INSERT INTO contracts_deployed_by_user (chain_id, deployer, contract_address, tx_hash, block_number)
 SELECT DISTINCT
-    {chain_id:UInt32} as chain_id,
+    {chain_id} as chain_id,
     tx_from as deployer,
     to as contract_address,
     tx_hash,
     block_number
 FROM raw_traces
-WHERE chain_id = {chain_id:UInt32}
-  AND block_number >= {first_block:UInt64}
-  AND block_number <= {last_block:UInt64}
+WHERE chain_id = @chain_id
+  AND block_number >= @first_block
+  AND block_number <= @last_block
   AND call_type IN ('CREATE', 'CREATE2', 'CREATE3')
   AND tx_success = true
   AND to IS NOT NULL

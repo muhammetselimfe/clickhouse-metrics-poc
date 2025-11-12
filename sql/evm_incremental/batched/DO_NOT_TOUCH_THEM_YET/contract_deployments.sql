@@ -20,14 +20,14 @@ SETTINGS index_granularity = 1024;
 -- The `to` field of a CREATE trace contains the new contract's address.
 INSERT INTO contract_deployments (chain_id, contract_address, tx_hash, block_number)
 SELECT DISTINCT
-    {chain_id:UInt32} as chain_id,
+    {chain_id} as chain_id,
     to as contract_address,
     tx_hash,
     block_number
 FROM raw_traces
-WHERE chain_id = {chain_id:UInt32}
-  AND block_number >= {first_block:UInt64}
-  AND block_number <= {last_block:UInt64}
+WHERE chain_id = @chain_id
+  AND block_number >= @first_block
+  AND block_number <= @last_block
   AND call_type IN ('CREATE', 'CREATE2', 'CREATE3')
   AND tx_success = true
   AND to IS NOT NULL
