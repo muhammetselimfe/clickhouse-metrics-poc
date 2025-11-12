@@ -21,17 +21,26 @@ interface MetricData {
   computed_at: string;
 }
 
-type Granularity = 'hour' | 'day' | 'week' | 'month';
+type TimePeriod = '24h' | '7d' | '30d' | '90d' | '1y' | 'all';
 
-const GRANULARITIES: { value: Granularity; label: string }[] = [
-  { value: 'hour', label: 'Hour' },
-  { value: 'day', label: 'Day' },
-  { value: 'week', label: 'Week' },
-  { value: 'month', label: 'Month' },
+interface TimePeriodConfig {
+  value: TimePeriod;
+  label: string;
+  granularity: 'hour' | 'day' | 'week';
+  clickhouseInterval: string; // e.g., "24 HOUR", "7 DAY"
+}
+
+const TIME_PERIODS: TimePeriodConfig[] = [
+  { value: '24h', label: '24 Hours', granularity: 'hour', clickhouseInterval: '24 HOUR' },
+  { value: '7d', label: '7 Days', granularity: 'hour', clickhouseInterval: '7 DAY' },
+  { value: '30d', label: '30 Days', granularity: 'day', clickhouseInterval: '30 DAY' },
+  { value: '90d', label: '90 Days', granularity: 'day', clickhouseInterval: '90 DAY' },
+  { value: '1y', label: '1 Year', granularity: 'day', clickhouseInterval: '1 YEAR' },
+  { value: 'all', label: 'All Time', granularity: 'week', clickhouseInterval: '' },
 ];
 
 function Metrics() {
-  const { chainId, granularity } = useParams<{ chainId: string; granularity: string }>();
+  const { chainId, timePeriod } = useParams<{ chainId: string; timePeriod: string }>();
   const navigate = useNavigate();
   const [metricNames, setMetricNames] = useState<string[]>([]);
   const [loadingMetricsList, setLoadingMetricsList] = useState(false);
@@ -39,7 +48,8 @@ function Metrics() {
   const { chains: syncStatusChains } = useSyncStatus();
 
   const selectedChainId = chainId ? parseInt(chainId) : 43114;
-  const selectedGranularity = (granularity as Granularity) || 'hour';
+  const selectedTimePeriod = (timePeriod as TimePeriod) || '7d';
+  const periodConfig = TIME_PERIODS.find(p => p.value === selectedTimePeriod) || TIME_PERIODS[1];
 
   const clickhouse = useMemo(() => createClient({
     url,
@@ -73,7 +83,7 @@ function Metrics() {
         const result = await clickhouse.query({
           query: `SELECT DISTINCT metric_name 
                   FROM metrics 
-                  WHERE chain_id = ${selectedChainId} AND granularity = '${selectedGranularity}'
+                  WHERE chain_id = ${selectedChainId} AND granularity = '${periodConfig.granularity}'
                   ORDER BY metric_name`,
           format: 'JSONEachRow',
         });
@@ -103,83 +113,67 @@ function Metrics() {
     return () => {
       cancelled = true;
     };
-  }, [selectedChainId, selectedGranularity]);
+  }, [selectedChainId, periodConfig.granularity, clickhouse]);
 
   return (
     <PageTransition>
       <div className="p-8 space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900">EVM Metrics</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold text-gray-900">EVM Metrics</h1>
+        </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Chain Selector */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Chain</h2>
+        {/* Compact filters */}
+        <div className="bg-white rounded-lg shadow p-4">
+          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center">
+            {/* Chain Selector */}
+            <div className="flex items-center gap-3 min-w-0 flex-shrink-0">
+              <label className="text-sm font-semibold text-gray-700 whitespace-nowrap">Chain:</label>
+              {isLoading && (
+                <p className="text-sm text-gray-500">Loading...</p>
+              )}
+              {error && (
+                <p className="text-sm text-red-600">Error loading chains</p>
+              )}
+              {chains && (
+                <select
+                  value={selectedChainId}
+                  onChange={(e) => navigate(`/evm-metrics/${e.target.value}/${selectedTimePeriod}`)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-900 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer"
+                >
+                  {chains.map((chain) => {
+                    const syncStatus = syncStatusChains?.find(c => c.chain_id === chain.chain_id);
+                    const needsWarning = syncStatus && syncStatus.syncPercentage < 99.9;
+                    return (
+                      <option key={chain.chain_id} value={chain.chain_id}>
+                        {chain.name} (ID: {chain.chain_id})
+                        {needsWarning ? ` - ${syncStatus.syncPercentage.toFixed(1)}% synced` : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              )}
+            </div>
 
-            {isLoading && (
-              <p className="text-gray-500">Loading chains...</p>
-            )}
-
-            {error && (
-              <p className="text-red-600">Error loading chains: {error.message}</p>
-            )}
-
-            {chains && (
-              <div className="space-y-2">
-                {chains.map((chain) => {
-                  const isSelected = selectedChainId === chain.chain_id;
-                  const syncStatus = syncStatusChains?.find(c => c.chain_id === chain.chain_id);
-                  const needsWarning = syncStatus && syncStatus.syncPercentage < 99.9;
+            {/* Time Period Pills */}
+            <div className="flex items-center gap-3 flex-wrap flex-1">
+              <label className="text-sm font-semibold text-gray-700 whitespace-nowrap">Period:</label>
+              <div className="flex gap-2 flex-wrap">
+                {TIME_PERIODS.map((period) => {
+                  const isSelected = selectedTimePeriod === period.value;
                   return (
                     <button
-                      key={chain.chain_id}
-                      onClick={() => navigate(`/evm-metrics/${chain.chain_id}/${selectedGranularity}`)}
-                      className={`w-full flex items-center gap-3 p-3 border rounded-lg transition-all text-left cursor-pointer ${isSelected
-                        ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
-                        : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                      key={period.value}
+                      onClick={() => navigate(`/evm-metrics/${selectedChainId}/${period.value}`)}
+                      className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all cursor-pointer ${isSelected
+                        ? 'bg-blue-500 text-white shadow-sm'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                         }`}
                     >
-                      <div className="flex-1">
-                        <div className={`font-medium ${isSelected ? 'text-blue-900' : 'text-gray-900'}`}>
-                          {chain.name}
-                          {needsWarning && (
-                            <span className="ml-2 text-xs font-semibold text-yellow-600">
-                              {syncStatus.syncPercentage.toFixed(1)}% synced
-                            </span>
-                          )}
-                        </div>
-                        <div className={`text-sm ${isSelected ? 'text-blue-600' : 'text-gray-500'}`}>
-                          Chain ID: {chain.chain_id}
-                        </div>
-                      </div>
-                      {isSelected && (
-                        <div className="w-2 h-2 rounded-full bg-blue-500" />
-                      )}
+                      {period.label}
                     </button>
                   );
                 })}
               </div>
-            )}
-          </div>
-
-          {/* Granularity Selector */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Granularity</h2>
-            <div className="grid grid-cols-2 gap-2">
-              {GRANULARITIES.map((granularity) => {
-                const isSelected = selectedGranularity === granularity.value;
-                return (
-                  <button
-                    key={granularity.value}
-                    onClick={() => navigate(`/evm-metrics/${selectedChainId}/${granularity.value}`)}
-                    className={`p-3 border rounded-lg transition-all font-medium cursor-pointer ${isSelected
-                      ? 'border-blue-500 bg-blue-50 text-blue-900 ring-2 ring-blue-200'
-                      : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300 text-gray-700'
-                      }`}
-                  >
-                    {granularity.label}
-                  </button>
-                );
-              })}
             </div>
           </div>
         </div>
@@ -204,7 +198,7 @@ function Metrics() {
                 key={metricName}
                 metricName={metricName}
                 chainId={selectedChainId}
-                granularity={selectedGranularity}
+                periodConfig={periodConfig}
                 clickhouse={clickhouse}
                 url={url}
               />
@@ -228,25 +222,71 @@ interface MetricQueryResult {
 function MetricChartLoader({
   metricName,
   chainId,
-  granularity,
+  periodConfig,
   clickhouse,
   url
 }: {
   metricName: string;
   chainId: number;
-  granularity: string;
+  periodConfig: TimePeriodConfig;
   clickhouse: ReturnType<typeof createClient>;
   url: string;
 }) {
   const { data, isLoading, error } = useQuery<MetricQueryResult>({
-    queryKey: ['metric', chainId, granularity, metricName, url],
+    queryKey: ['metric', chainId, periodConfig.value, metricName, url],
     queryFn: async () => {
-      const sqlQuery = `SELECT chain_id, metric_name, granularity, period, value, computed_at 
-                FROM metrics 
-                WHERE chain_id = ${chainId} 
-                  AND granularity = '${granularity}'
-                  AND metric_name = '${metricName}'
-                ORDER BY period ASC`;
+      let sqlQuery: string;
+
+      if (periodConfig.value === 'all') {
+        // For "all time", just get all data without filling
+        sqlQuery = `SELECT chain_id, metric_name, granularity, period, value, computed_at 
+                    FROM metrics 
+                    WHERE chain_id = ${chainId} 
+                      AND granularity = '${periodConfig.granularity}' 
+                      AND metric_name = '${metricName}'
+                    ORDER BY period ASC`;
+      } else {
+        // Calculate step size and truncation function based on granularity
+        let stepInterval: string;
+        let truncateFunc: string;
+        if (periodConfig.granularity === 'hour') {
+          stepInterval = 'INTERVAL 1 HOUR';
+          truncateFunc = 'toStartOfHour';
+        } else if (periodConfig.granularity === 'day') {
+          stepInterval = 'INTERVAL 1 DAY';
+          truncateFunc = 'toStartOfDay';
+        } else {
+          stepInterval = 'INTERVAL 1 WEEK';
+          truncateFunc = 'toStartOfWeek';
+        }
+
+        // Use WITH FILL - simpler approach
+        // Select period and value, then add the constants
+        sqlQuery = `
+          SELECT 
+            ${chainId} as chain_id,
+            '${metricName}' as metric_name,
+            '${periodConfig.granularity}' as granularity,
+            period,
+            if(value IS NULL, 0, value) as value,
+            if(computed_at IS NULL, toDateTime64(now(), 3, 'UTC'), computed_at) as computed_at
+          FROM (
+            SELECT 
+              period,
+              any(value) as value,
+              any(computed_at) as computed_at
+            FROM metrics 
+            WHERE chain_id = ${chainId} 
+              AND granularity = '${periodConfig.granularity}' 
+              AND metric_name = '${metricName}'
+              AND period >= toDateTime64(${truncateFunc}(now() - INTERVAL ${periodConfig.clickhouseInterval}), 3, 'UTC')
+            GROUP BY period
+            ORDER BY period ASC WITH FILL 
+              FROM toDateTime64(${truncateFunc}(now() - INTERVAL ${periodConfig.clickhouseInterval}), 3, 'UTC') 
+              TO toDateTime64(${truncateFunc}(now()) + ${stepInterval}, 3, 'UTC')
+              STEP ${stepInterval}
+          )`;
+      }
 
       const result = await clickhouse.query({
         query: sqlQuery,
@@ -311,7 +351,7 @@ function MetricChartLoader({
       <MetricChart
         metricName={metricName}
         data={data.data}
-        granularity={granularity}
+        granularity={periodConfig.granularity}
       />
 
       {/* Query Stats */}
