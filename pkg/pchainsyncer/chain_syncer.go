@@ -38,9 +38,9 @@ type PChainSyncer struct {
 	chainName      string
 	fetcher        *pchainrpc.Fetcher
 	conn           driver.Conn
-	blockChan      chan []*pchainrpc.NormalizedBlock // Bounded channel for backpressure
-	watermark      uint64                            // Current sync position
-	startBlock     int64                             // Starting block when no watermark
+	blockChan      chan []*pchainrpc.JSONBlock // Bounded channel for backpressure
+	watermark      uint64                      // Current sync position
+	startBlock     int64                       // Starting block when no watermark
 	fetchBatchSize int
 	flushInterval  time.Duration
 
@@ -88,7 +88,7 @@ func NewPChainSyncer(cfg Config) (*PChainSyncer, error) {
 		chainName:      cfg.Name,
 		fetcher:        fetcher,
 		conn:           cfg.CHConn,
-		blockChan:      make(chan []*pchainrpc.NormalizedBlock, BufferSize),
+		blockChan:      make(chan []*pchainrpc.JSONBlock, BufferSize),
 		startBlock:     cfg.StartBlock,
 		fetchBatchSize: cfg.FetchBatchSize,
 		flushInterval:  FlushInterval,
@@ -214,7 +214,7 @@ func (ps *PChainSyncer) fetcherLoop(startBlock, latestBlock int64) {
 			}
 
 			// Fetch blocks
-			blocks, err := ps.fetcher.FetchBlockRange(currentBlock, endBlock)
+			blocks, err := ps.fetcher.FetchBlockRangeJSON(currentBlock, endBlock)
 			if err != nil {
 				log.Printf("[Chain %d - %s] Error fetching blocks %d-%d: %v",
 					ps.chainID, ps.chainName, currentBlock, endBlock, err)
@@ -242,7 +242,7 @@ func (ps *PChainSyncer) fetcherLoop(startBlock, latestBlock int64) {
 func (ps *PChainSyncer) writerLoop() {
 	defer ps.wg.Done()
 
-	var buffer []*pchainrpc.NormalizedBlock
+	var buffer []*pchainrpc.JSONBlock
 	var lastFlushTime time.Time
 	flushTimer := time.NewTimer(ps.flushInterval)
 	defer flushTimer.Stop()
@@ -308,7 +308,7 @@ func (ps *PChainSyncer) writerLoop() {
 }
 
 // writeBlocks writes blocks to ClickHouse and updates watermark
-func (ps *PChainSyncer) writeBlocks(blocks []*pchainrpc.NormalizedBlock) error {
+func (ps *PChainSyncer) writeBlocks(blocks []*pchainrpc.JSONBlock) error {
 	if len(blocks) == 0 {
 		return nil
 	}

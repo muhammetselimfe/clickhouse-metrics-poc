@@ -1,7 +1,8 @@
 package pchainrpc
 
 import (
-	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/ava-labs/avalanchego/ids"
@@ -15,6 +16,15 @@ type NormalizedBlock struct {
 	ParentID     ids.ID
 	Timestamp    time.Time
 	Transactions []NormalizedTx
+}
+
+// JSONBlock represents a P-chain block with JSON-serialized transactions
+type JSONBlock struct {
+	BlockID      ids.ID
+	Height       uint64
+	ParentID     ids.ID
+	Timestamp    time.Time
+	Transactions []JSONTx
 }
 
 // NormalizedTx represents a normalized P-chain transaction for storage
@@ -92,6 +102,15 @@ type NormalizedTx struct {
 	Time *uint64 // Unix time this block proposes increasing the timestamp to
 }
 
+// JSONTx represents a P-chain transaction stored as JSON
+type JSONTx struct {
+	TxID        ids.ID
+	TxType      string
+	BlockHeight uint64
+	BlockTime   time.Time
+	TxData      []byte // JSON-serialized tx.Unsigned
+}
+
 // Input represents a transaction input
 type Input struct {
 	TxID        ids.ID
@@ -116,50 +135,17 @@ func ParseBlock(blk interface{}, blockBytes []byte) (*NormalizedBlock, error) {
 	return nil, nil
 }
 
-// TxTypeString returns a human-readable transaction type
+// TxTypeString returns a human-readable transaction type using reflection
 func TxTypeString(tx *txs.Tx) string {
 	if tx == nil || tx.Unsigned == nil {
-		panic("TxTypeString called with nil transaction or nil unsigned tx")
+		panic("tx is nil or unsigned tx is nil")
 	}
 
-	switch tx.Unsigned.(type) {
-	case *txs.ConvertSubnetToL1Tx:
-		return "ConvertSubnetToL1"
-	case *txs.AddValidatorTx:
-		return "AddValidator"
-	case *txs.AddDelegatorTx:
-		return "AddDelegator"
-	case *txs.BaseTx:
-		return "Base"
-	case *txs.CreateSubnetTx:
-		return "CreateSubnet"
-	case *txs.CreateChainTx:
-		return "CreateChain"
-	case *txs.ImportTx:
-		return "Import"
-	case *txs.ExportTx:
-		return "Export"
-	case *txs.AddSubnetValidatorTx:
-		return "AddSubnetValidator"
-	case *txs.RemoveSubnetValidatorTx:
-		return "RemoveSubnetValidator"
-	case *txs.TransformSubnetTx:
-		return "TransformSubnet"
-	case *txs.TransferSubnetOwnershipTx:
-		return "TransferSubnetOwnership"
-	case *txs.AddPermissionlessValidatorTx:
-		return "AddPermissionlessValidator"
-	case *txs.AddPermissionlessDelegatorTx:
-		return "AddPermissionlessDelegator"
-	case *txs.RewardValidatorTx:
-		return "RewardValidator"
-	case *txs.IncreaseL1ValidatorBalanceTx:
-		return "IncreaseL1ValidatorBalance"
-	case *txs.SetL1ValidatorWeightTx:
-		return "SetL1ValidatorWeight"
-	case *txs.AdvanceTimeTx:
-		return "AdvanceTime"
-	default:
-		panic(fmt.Sprintf("Unknown P-chain transaction type: %T - indexer is broken and needs to be updated", tx.Unsigned))
-	}
+	// Get the type name using reflection
+	typeName := reflect.TypeOf(tx.Unsigned).Elem().Name()
+
+	// Remove the "Tx" suffix if present
+	typeName = strings.TrimSuffix(typeName, "Tx")
+
+	return typeName
 }

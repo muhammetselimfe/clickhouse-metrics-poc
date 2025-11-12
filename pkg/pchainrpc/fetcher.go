@@ -9,7 +9,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"reflect"
 	"sync"
 	"time"
 
@@ -478,14 +477,6 @@ func (f *Fetcher) normalizeBlock(blk block.Block) (*NormalizedBlock, error) {
 
 // normalizeTx normalizes a transaction into storage format
 func (f *Fetcher) normalizeTx(tx *txs.Tx, blockHeight uint64, blockTime time.Time) (*NormalizedTx, error) {
-
-	unsignedTxBytes, err := json.Marshal(tx.Unsigned)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println("unsignedTx", string(unsignedTxBytes), reflect.TypeOf(tx.Unsigned))
-	panic("test")
-
 	if tx == nil || tx.Unsigned == nil {
 		return nil, fmt.Errorf("nil transaction or unsigned tx")
 	}
@@ -618,6 +609,289 @@ func (f *Fetcher) normalizeTx(tx *txs.Tx, blockHeight uint64, blockTime time.Tim
 	}
 
 	return normalized, nil
+}
+
+// normalizeBlockToJSON converts a platform block to JSON-based structure
+func (f *Fetcher) normalizeBlockToJSON(blk block.Block) (*JSONBlock, error) {
+	// Extract timestamp using visitor pattern
+	extractor := &timestampExtractor{}
+	if err := blk.Visit(extractor); err != nil {
+		return nil, fmt.Errorf("failed to extract timestamp: %w", err)
+	}
+	blockTime := extractor.timestamp
+
+	jsonBlock := &JSONBlock{
+		BlockID:      blk.ID(),
+		Height:       blk.Height(),
+		ParentID:     blk.Parent(),
+		Timestamp:    blockTime,
+		Transactions: make([]JSONTx, 0, len(blk.Txs())),
+	}
+
+	// Parse each transaction
+	for _, tx := range blk.Txs() {
+		jsonTx, err := f.normalizeTxToJSON(tx, blk.Height(), blockTime)
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize tx %s: %w", tx.ID(), err)
+		}
+		jsonBlock.Transactions = append(jsonBlock.Transactions, *jsonTx)
+	}
+
+	return jsonBlock, nil
+}
+
+// normalizeTxToJSON normalizes a transaction into JSON storage format
+func (f *Fetcher) normalizeTxToJSON(tx *txs.Tx, blockHeight uint64, blockTime time.Time) (*JSONTx, error) {
+	if tx == nil || tx.Unsigned == nil {
+		return nil, fmt.Errorf("nil transaction or unsigned tx")
+	}
+
+	// Serialize the entire tx.Unsigned to JSON
+	txDataJSON, err := json.Marshal(tx.Unsigned)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal tx.Unsigned to JSON: %w", err)
+	}
+
+	jsonTx := &JSONTx{
+		TxID:        tx.ID(),
+		TxType:      TxTypeString(tx),
+		BlockHeight: blockHeight,
+		BlockTime:   blockTime,
+		TxData:      txDataJSON,
+	}
+
+	return jsonTx, nil
+}
+
+// FetchBlockRangeJSON fetches a range of blocks and returns them as JSON blocks
+func (f *Fetcher) FetchBlockRangeJSON(from, to int64) ([]*JSONBlock, error) {
+	if from > to {
+		return nil, fmt.Errorf("invalid range: from (%d) > to (%d)", from, to)
+	}
+
+	numBlocks := to - from + 1
+	if numBlocks <= 0 {
+		return nil, nil
+	}
+
+	// Try to get blocks from cache first
+	if f.cache != nil {
+		cachedBlocks, missingBlocks := f.getCachedJSONBlocks(from, to)
+
+		// If we have all blocks cached, return them
+		if len(missingBlocks) == 0 {
+			result := make([]*JSONBlock, numBlocks)
+			for i := int64(0); i < numBlocks; i++ {
+				result[i] = cachedBlocks[from+i]
+			}
+			return result, nil
+		}
+
+		// Fetch missing blocks
+		fetchedBlocks, err := f.fetchAndCacheMissingJSONBlocks(missingBlocks)
+		if err != nil {
+			return nil, err
+		}
+
+		// Merge cached and fetched blocks
+		for height, block := range fetchedBlocks {
+			cachedBlocks[height] = block
+		}
+
+		// Build result array in order
+		result := make([]*JSONBlock, numBlocks)
+		for i := int64(0); i < numBlocks; i++ {
+			result[i] = cachedBlocks[from+i]
+		}
+		return result, nil
+	}
+
+	// No cache - fetch all blocks
+	blocks := make([]*JSONBlock, numBlocks)
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var fetchErr error
+
+	// Fetch blocks concurrently
+	for i := int64(0); i < int64(numBlocks); i++ {
+		wg.Add(1)
+		go func(idx int64) {
+			defer wg.Done()
+
+			blockHeight := from + idx
+
+			f.rpcLimit <- struct{}{}
+			defer func() { <-f.rpcLimit }()
+
+			block, err := f.fetchSingleJSONBlock(blockHeight)
+			if err != nil {
+				mu.Lock()
+				if fetchErr == nil {
+					fetchErr = fmt.Errorf("failed to fetch block %d: %w", blockHeight, err)
+				}
+				mu.Unlock()
+				return
+			}
+
+			mu.Lock()
+			blocks[idx] = block
+			mu.Unlock()
+		}(i)
+	}
+
+	wg.Wait()
+
+	if fetchErr != nil {
+		return nil, fetchErr
+	}
+
+	return blocks, nil
+}
+
+// getCachedJSONBlocks attempts to get blocks from cache, returning cached blocks and list of missing block numbers
+func (f *Fetcher) getCachedJSONBlocks(from, to int64) (map[int64]*JSONBlock, []int64) {
+	cached := make(map[int64]*JSONBlock)
+	var missing []int64
+
+	// Get block range from cache
+	cachedData, err := f.cache.GetBlockRange(from, to)
+	if err != nil {
+		// On error, mark all as missing
+		for height := from; height <= to; height++ {
+			missing = append(missing, height)
+		}
+		return cached, missing
+	}
+
+	// Process cached blocks and identify missing ones
+	for height := from; height <= to; height++ {
+		if rawBytes, ok := cachedData[height]; ok && rawBytes != nil {
+			// Parse and convert to JSON
+			jsonBlock, err := f.parseAndNormalizeToJSON(rawBytes)
+			if err != nil {
+				missing = append(missing, height)
+				continue
+			}
+			cached[height] = jsonBlock
+		} else {
+			missing = append(missing, height)
+		}
+	}
+
+	return cached, missing
+}
+
+// fetchAndCacheMissingJSONBlocks fetches missing blocks, caches raw bytes, and returns JSON blocks
+func (f *Fetcher) fetchAndCacheMissingJSONBlocks(missingBlocks []int64) (map[int64]*JSONBlock, error) {
+	if len(missingBlocks) == 0 {
+		return make(map[int64]*JSONBlock), nil
+	}
+
+	result := make(map[int64]*JSONBlock)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var fetchErr error
+
+	for _, blockNum := range missingBlocks {
+		wg.Add(1)
+		go func(height int64) {
+			defer wg.Done()
+
+			f.rpcLimit <- struct{}{}
+			defer func() { <-f.rpcLimit }()
+
+			// Fetch raw block bytes
+			blockBytes, err := f.client.GetBlockByHeight(context.Background(), uint64(height))
+			if err != nil {
+				mu.Lock()
+				if fetchErr == nil {
+					fetchErr = fmt.Errorf("GetBlockByHeight failed for block %d: %w", height, err)
+				}
+				mu.Unlock()
+				return
+			}
+
+			// Cache raw bytes immediately
+			if f.cache != nil {
+				_, _ = f.cache.GetCompleteBlock(height, func() ([]byte, error) {
+					return blockBytes, nil
+				})
+			}
+
+			// Parse and normalize to JSON
+			jsonBlock, err := f.parseAndNormalizeToJSON(blockBytes)
+			if err != nil {
+				mu.Lock()
+				if fetchErr == nil {
+					fetchErr = fmt.Errorf("parseAndNormalizeToJSON failed for block %d: %w", height, err)
+				}
+				mu.Unlock()
+				return
+			}
+
+			mu.Lock()
+			result[height] = jsonBlock
+			mu.Unlock()
+		}(blockNum)
+	}
+
+	wg.Wait()
+
+	if fetchErr != nil {
+		return nil, fetchErr
+	}
+
+	return result, nil
+}
+
+// parseAndNormalizeToJSON parses raw block bytes and normalizes to JSON format
+func (f *Fetcher) parseAndNormalizeToJSON(blockBytes []byte) (*JSONBlock, error) {
+	blk, err := block.Parse(block.Codec, blockBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse block: %w", err)
+	}
+	return f.normalizeBlockToJSON(blk)
+}
+
+// fetchSingleJSONBlock fetches a single block by height with retry logic and returns JSON format
+func (f *Fetcher) fetchSingleJSONBlock(height int64) (*JSONBlock, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= f.maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := f.retryDelay * time.Duration(1<<uint(attempt-1))
+			if delay > 10*time.Second {
+				delay = 10 * time.Second
+			}
+			time.Sleep(delay)
+		}
+
+		// Fetch block bytes
+		blockBytes, err := f.client.GetBlockByHeight(context.Background(), uint64(height))
+		if err != nil {
+			lastErr = fmt.Errorf("GetBlockByHeight failed: %w", err)
+			continue
+		}
+
+		// Cache raw bytes immediately if cache is enabled
+		if f.cache != nil {
+			_, _ = f.cache.GetCompleteBlock(height, func() ([]byte, error) {
+				return blockBytes, nil
+			})
+		}
+
+		// Parse and normalize to JSON
+		jsonBlock, err := f.parseAndNormalizeToJSON(blockBytes)
+		if err != nil {
+			lastErr = fmt.Errorf("parseAndNormalizeToJSON failed: %w", err)
+			continue
+		}
+
+		return jsonBlock, nil
+	}
+
+	return nil, fmt.Errorf("failed to fetch block %d after %d retries: %w", height, f.maxRetries, lastErr)
 }
 
 // Close stops all background goroutines and cleans up resources
