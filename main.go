@@ -23,12 +23,18 @@ func main() {
 	}
 	wipeCmd.Flags().Bool("all", false, "Drop all tables including raw_* tables")
 
-	root.AddCommand(
-		&cobra.Command{
-			Use:   "ingest",
-			Short: "Start the continuous ingestion process",
-			Run:   func(command *cobra.Command, args []string) { cmd.RunIngest() },
+	ingestCmd := &cobra.Command{
+		Use:   "ingest",
+		Short: "Start the continuous ingestion process",
+		Run: func(command *cobra.Command, args []string) {
+			fast, _ := command.Flags().GetBool("fast")
+			cmd.RunIngest(fast)
 		},
+	}
+	ingestCmd.Flags().Bool("fast", false, "Skip all indexers (incremental and metrics)")
+
+	root.AddCommand(
+		ingestCmd,
 		&cobra.Command{
 			Use:   "cache",
 			Short: "Fill RPC cache at max speed (no ClickHouse)",

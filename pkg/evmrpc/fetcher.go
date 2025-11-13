@@ -168,7 +168,7 @@ func (f *Fetcher) batchRpcCall(requests []jsonRpcRequest) ([]jsonRpcResponse, er
 			if delay > 10*time.Second {
 				delay = 10 * time.Second
 			}
-			fmt.Printf("WARNING: Batch request failed: %v. Retrying (attempt %d/%d) after %v\n", lastErr, attempt, f.maxRetries, delay)
+			log.Printf("[Chain %d - %s] WARNING: Batch request failed: %v. Retrying (attempt %d/%d) after %v", f.chainID, f.chainName, lastErr, attempt, f.maxRetries, delay)
 			time.Sleep(delay)
 		}
 
@@ -252,7 +252,7 @@ func (f *Fetcher) batchRpcCallDebug(requests []jsonRpcRequest) ([]jsonRpcRespons
 			if delay > 10*time.Second {
 				delay = 10 * time.Second
 			}
-			fmt.Printf("WARNING: Debug batch request failed: %v. Retrying (attempt %d/%d) after %v\n", lastErr, attempt, f.maxRetries, delay)
+			log.Printf("[Chain %d - %s] WARNING: Debug batch request failed: %v. Retrying (attempt %d/%d) after %v", f.chainID, f.chainName, lastErr, attempt, f.maxRetries, delay)
 			time.Sleep(delay)
 		}
 
@@ -387,7 +387,7 @@ func (f *Fetcher) FetchBlockRange(from, to int64) ([]*NormalizedBlock, error) {
 			// Cache hit - deserialize
 			var block NormalizedBlock
 			if err := json.Unmarshal(data, &block); err != nil {
-				fmt.Printf("Warning: failed to deserialize cached block %d: %v\n", blockNum, err)
+				log.Printf("[Chain %d - %s] Warning: failed to deserialize cached block %d: %v", f.chainID, f.chainName, blockNum, err)
 				missingBlocks = append(missingBlocks, blockNum)
 			} else {
 				result[int(i)] = &block
@@ -919,7 +919,7 @@ func (f *Fetcher) fetchTracesBatch(from, to int64, txInfos []txInfo) (map[string
 				if resp.Error != nil {
 					// ONLY precompile errors are acceptable as nil traces
 					if isPrecompileError(fmt.Errorf("%s", resp.Error.Message)) {
-						fmt.Printf("Trace failed for tx %s (precompile), treating as nil trace\n", txHash)
+						log.Printf("[Chain %d - %s] Trace failed for tx %s (precompile), treating as nil trace", f.chainID, f.chainName, txHash)
 						mu.Lock()
 						tracesMap[txHash] = &TraceResultOptional{
 							TxHash: txHash,

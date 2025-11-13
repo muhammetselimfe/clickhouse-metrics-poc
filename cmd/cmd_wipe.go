@@ -52,6 +52,7 @@ func wipeCalculatedTables(conn driver.Conn, all bool) error {
 		keepTables["raw_txs"] = true
 		keepTables["raw_traces"] = true
 		keepTables["raw_logs"] = true
+		keepTables["p_chain_txs"] = true
 		keepTables["sync_watermark"] = true
 	}
 

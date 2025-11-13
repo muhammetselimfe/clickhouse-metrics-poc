@@ -15,8 +15,8 @@ CREATE SETTINGS PROFILE anonymous_profile SETTINGS
     allow_ddl = 0,
     allow_introspection_functions = 0,
 
-    -- keep UI snappy, one query at a time per user
-    max_concurrent_queries_for_user = 1,
+    -- allow parallel queries for dashboard widgets
+    max_concurrent_queries_for_user = 10,
     max_threads = 1,
 
     -- cap what the browser digests
@@ -68,7 +68,7 @@ CREATE QUOTA anonymous_quota KEYED BY ip_address
 DROP QUOTA IF EXISTS anonymous_heavy_quota;
 CREATE QUOTA anonymous_heavy_quota KEYED BY ip_address
     FOR INTERVAL 1 minute
-        MAX QUERIES 3,
+        MAX QUERIES 10,
         MAX ERRORS 10;
 
 -- === Users (demo: open to all IPs, throttled by quotas/profiles) ===

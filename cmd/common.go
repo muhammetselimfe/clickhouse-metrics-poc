@@ -61,7 +61,7 @@ func LoadConfig(path string) ([]ChainConfig, error) {
 }
 
 // CreateSyncer creates the appropriate syncer based on VM type
-func CreateSyncer(cfg ChainConfig, conn driver.Conn, cacheInstance *cache.Cache) (Syncer, error) {
+func CreateSyncer(cfg ChainConfig, conn driver.Conn, cacheInstance *cache.Cache, fast bool) (Syncer, error) {
 	switch cfg.VM {
 	case "evm":
 		return evmsyncer.NewChainSyncer(evmsyncer.Config{
@@ -73,6 +73,7 @@ func CreateSyncer(cfg ChainConfig, conn driver.Conn, cacheInstance *cache.Cache)
 			Cache:          cacheInstance,
 			FetchBatchSize: cfg.FetchBatchSize,
 			Name:           cfg.Name,
+			Fast:           fast,
 		})
 
 	case "p":

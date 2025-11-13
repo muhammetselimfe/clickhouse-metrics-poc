@@ -32,6 +32,7 @@ type Config struct {
 	CHConn         driver.Conn  // ClickHouse connection
 	Cache          *cache.Cache // Cache for RPC calls
 	Name           string       // Chain name for display and tracking
+	Fast           bool         // Fast mode - skip all indexers
 }
 
 // ChainSyncer manages blockchain sync for a single chain
@@ -65,6 +66,7 @@ type ChainSyncer struct {
 
 	// Indexer runner (one per chain)
 	indexerRunner *evmindexer.IndexRunner
+	fast          bool // Fast mode - skip all indexers
 }
 
 // NewChainSyncer creates a new chain syncer
@@ -105,15 +107,20 @@ func NewChainSyncer(cfg Config) (*ChainSyncer, error) {
 		cancel:         cancel,
 		lastPrintTime:  time.Now(),
 		startTime:      time.Now(),
+		fast:           cfg.Fast,
 	}
 
-	// Initialize indexer runner - one per chain
-	indexerRunner, err := evmindexer.NewIndexRunner(cfg.ChainID, cfg.CHConn, "sql")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create indexer runner: %w", err)
+	// Initialize indexer runner - one per chain (skip in fast mode)
+	if !cfg.Fast {
+		indexerRunner, err := evmindexer.NewIndexRunner(cfg.ChainID, cfg.CHConn, "sql")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create indexer runner: %w", err)
+		}
+		cs.indexerRunner = indexerRunner
+		log.Printf("[Chain %d] Indexer runner initialized", cfg.ChainID)
+	} else {
+		log.Printf("[Chain %d] Fast mode - indexers disabled", cfg.ChainID)
 	}
-	cs.indexerRunner = indexerRunner
-	log.Printf("[Chain %d] Indexer runner initialized", cfg.ChainID)
 
 	return cs, nil
 }
@@ -176,12 +183,14 @@ func (cs *ChainSyncer) Start() error {
 	cs.wg.Add(1)
 	go cs.printProgress()
 
-	// Start indexer loop
-	cs.wg.Add(1)
-	go func() {
-		defer cs.wg.Done()
-		cs.indexerRunner.Start()
-	}()
+	// Start indexer loop (skip in fast mode)
+	if !cs.fast {
+		cs.wg.Add(1)
+		go func() {
+			defer cs.wg.Done()
+			cs.indexerRunner.Start()
+		}()
+	}
 
 	return nil
 }
@@ -438,9 +447,11 @@ func (cs *ChainSyncer) writeBlocks(blocks []*evmrpc.NormalizedBlock) error {
 				return fmt.Errorf("failed to parse block timestamp: %w", err)
 			}
 
-			// Call OnBlock with block number and timestamp
-			blockTime := time.Unix(int64(timestamp), 0).UTC()
-			cs.indexerRunner.OnBlock(uint64(latestBlockNum), blockTime)
+			// Call OnBlock with block number and timestamp (skip in fast mode)
+			if !cs.fast {
+				blockTime := time.Unix(int64(timestamp), 0).UTC()
+				cs.indexerRunner.OnBlock(uint64(latestBlockNum), blockTime)
+			}
 		}
 	}
 

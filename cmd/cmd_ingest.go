@@ -7,8 +7,12 @@ import (
 	"sync"
 )
 
-func RunIngest() {
-	log.Println("Starting ingest...")
+func RunIngest(fast bool) {
+	if fast {
+		log.Println("Starting ingest in FAST mode (indexers disabled)...")
+	} else {
+		log.Println("Starting ingest...")
+	}
 
 	// Load configuration from YAML
 	configs, err := LoadConfig("config.yaml")
@@ -44,7 +48,7 @@ func RunIngest() {
 		defer cacheInstance.Close()
 
 		// Create syncer based on VM type
-		syncer, err := CreateSyncer(cfg, conn, cacheInstance)
+		syncer, err := CreateSyncer(cfg, conn, cacheInstance, fast)
 		if err != nil {
 			log.Fatalf("Failed to create syncer for chain %d (%s): %v", cfg.ChainID, cfg.VM, err)
 		}
