@@ -6,13 +6,12 @@ import (
 )
 
 // processIncrementalBatch processes all pending blocks for all incremental indexers
-// Processes block-by-block: block 1 for all indexers, then block 2 for all indexers, etc.
+// Processes ALL blocks in one shot: from watermark+1 to latestBlockNum
 // Returns true if any work was done
 func (r *IndexRunner) processIncrementalBatch() bool {
 	hasWork := false
 
-	// Find the minimum watermark across all indexers
-	minWatermark := r.latestBlockNum
+	// Process each indexer independently
 	for _, indexerFile := range r.incrementalIndexers {
 		indexerName := fmt.Sprintf("incremental/%s", indexerFile)
 		watermark := r.getWatermark(indexerName)
@@ -22,63 +21,42 @@ func (r *IndexRunner) processIncrementalBatch() bool {
 			watermark.LastBlockNum = r.startBlock - 1
 		}
 
-		if watermark.LastBlockNum < minWatermark {
-			minWatermark = watermark.LastBlockNum
-		}
-	}
+		// Check if there are blocks to process
+		if watermark.LastBlockNum < r.latestBlockNum {
+			fromBlock := watermark.LastBlockNum + 1
+			toBlock := r.latestBlockNum
 
-	// Process one block at a time across all indexers
-	if minWatermark < r.latestBlockNum {
-		blockNum := minWatermark + 1
-
-		for _, indexerFile := range r.incrementalIndexers {
-			indexerName := fmt.Sprintf("incremental/%s", indexerFile)
-			watermark := r.getWatermark(indexerName)
-
-			// Skip if this indexer is ahead
-			if watermark.LastBlockNum >= blockNum {
-				continue
-			}
-
-			// Run indexer for this block
+			// Run indexer for the entire block range
 			start := time.Now()
-			if err := r.runIncrementalIndexer(indexerFile, blockNum); err != nil {
+			if err := r.runIncrementalIndexer(indexerFile, fromBlock, toBlock); err != nil {
 				fmt.Printf("[Chain %d] FATAL: Failed to run %s: %v\n", r.chainId, indexerName, err)
 				panic(err)
 			}
 			elapsed := time.Since(start)
 
-			// Update watermark in memory
-			watermark.LastBlockNum = blockNum
+			// Update watermark to the latest block
+			watermark.LastBlockNum = toBlock
 
-			// Save watermark to DB only if >1s since last save OR if caught up
-			lastSave := r.lastWatermarkSave[indexerName]
-			isCaughtUp := blockNum >= r.latestBlockNum
-			shouldSave := time.Since(lastSave) > time.Second || isCaughtUp
-
-			if shouldSave {
-				if err := r.saveWatermark(indexerName, watermark); err != nil {
-					fmt.Printf("[Chain %d] FATAL: Failed to save watermark for %s: %v\n", r.chainId, indexerName, err)
-					panic(err)
-				}
-				r.lastWatermarkSave[indexerName] = time.Now()
+			// Save watermark to DB
+			if err := r.saveWatermark(indexerName, watermark); err != nil {
+				fmt.Printf("[Chain %d] FATAL: Failed to save watermark for %s: %v\n", r.chainId, indexerName, err)
+				panic(err)
 			}
 
-			// Only log if slow (>100ms) or every 1000 blocks
-			if elapsed > 100*time.Millisecond || blockNum%1000 == 0 {
-				fmt.Printf("[Chain %d] %s - block %d - %s\n",
-					r.chainId, indexerName, blockNum, elapsed)
-			}
+			// Log the batch processing
+			blockCount := toBlock - fromBlock + 1
+			fmt.Printf("[Chain %d] %s - processed blocks %d to %d (%d blocks) - %s\n",
+				r.chainId, indexerName, fromBlock, toBlock, blockCount, elapsed)
+
+			hasWork = true
 		}
-
-		hasWork = true
 	}
 
 	return hasWork
 }
 
-// runIncrementalIndexer executes an incremental indexer for a single block
-func (r *IndexRunner) runIncrementalIndexer(indexerFile string, blockNum uint64) error {
+// runIncrementalIndexer executes an incremental indexer for a block range
+func (r *IndexRunner) runIncrementalIndexer(indexerFile string, fromBlock, toBlock uint64) error {
 	// Template parameters (string replacement for SELECT clauses)
 	templateParams := []struct{ key, value string }{
 		{"{chain_id}", fmt.Sprintf("%d", r.chainId)},
@@ -86,8 +64,9 @@ func (r *IndexRunner) runIncrementalIndexer(indexerFile string, blockNum uint64)
 
 	// Bind parameters (native ClickHouse parameter binding for WHERE clauses)
 	bindParams := map[string]interface{}{
-		"chain_id":     r.chainId,
-		"block_number": blockNum,
+		"chain_id":   r.chainId,
+		"from_block": fromBlock,
+		"to_block":   toBlock,
 	}
 
 	filename := fmt.Sprintf("evm_incremental/%s.sql", indexerFile)

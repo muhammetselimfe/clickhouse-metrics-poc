@@ -28,9 +28,6 @@ type IndexRunner struct {
 	// Watermarks (in-memory cache, backed by DB)
 	watermarks map[string]*Watermark
 
-	// Last watermark save time (for batching writes during sync)
-	lastWatermarkSave map[string]time.Time
-
 	// Discovered indexers (loaded once at startup)
 	granularMetrics     []string
 	incrementalIndexers []string
@@ -54,12 +51,11 @@ func NewIndexRunner(chainId uint32, conn driver.Conn, sqlDir string, startBlock 
 	}
 
 	runner := &IndexRunner{
-		chainId:           chainId,
-		conn:              conn,
-		sqlDir:            sqlDir,
-		startBlock:        startBlock,
-		watermarks:        make(map[string]*Watermark),
-		lastWatermarkSave: make(map[string]time.Time),
+		chainId:    chainId,
+		conn:       conn,
+		sqlDir:     sqlDir,
+		startBlock: startBlock,
+		watermarks: make(map[string]*Watermark),
 	}
 
 	// Discover indexers

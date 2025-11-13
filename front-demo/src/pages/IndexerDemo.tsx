@@ -122,7 +122,7 @@ FROM erc20_balances
 WHERE chain_id = ${selectedChainId}
   AND wallet = unhex('${sampleData.wallet}')
   AND token = unhex('${sampleData.token}')
-  AND block_number <= ${sampleData.block_number - 123}
+  AND block_number <= ${sampleData.block_number + 123}
 ORDER BY block_number DESC
 LIMIT 1`
         : '-- Loading sample data...';

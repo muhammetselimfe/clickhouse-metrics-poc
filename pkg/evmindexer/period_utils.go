@@ -86,12 +86,6 @@ func getPeriodsToProcess(lastProcessed, latestBlockTime time.Time, granularity s
 	for isPeriodComplete(currentPeriod, latestBlockTime, granularity) {
 		periods = append(periods, currentPeriod)
 		currentPeriod = nextPeriod(currentPeriod, granularity)
-
-		// Safety limit to prevent infinite loops
-		if len(periods) > 100000 {
-			fmt.Printf("[Periods] Limiting to 100000 periods for %s\n", granularity)
-			break
-		}
 	}
 
 	return periods
