@@ -1,20 +1,22 @@
--- ERC-20 Balance Tracking - Current Balance Only
--- Stores: chain_id, wallet, token, balance, last_updated_block
+-- ERC-20 Balance Tracking - Separate Credits/Debits
+-- Stores: chain_id, wallet, token, total_in, total_out, last_updated_block
+-- Balance = total_in - total_out (computed at query time)
 -- Uses ReplacingMergeTree for idempotency
 
 CREATE TABLE IF NOT EXISTS erc20_balances (
     chain_id UInt32,
     wallet FixedString(20),
     token FixedString(20),
-    balance UInt256,
+    total_in UInt256,
+    total_out UInt256,
     last_updated_block UInt32,
     computed_at DateTime64(3, 'UTC') DEFAULT now64(3)
 ) ENGINE = ReplacingMergeTree(computed_at)
 ORDER BY (chain_id, wallet, token);
 
--- Process block range: update current balances  
+-- Process block range: accumulate credits and debits
 -- Start from max(last_updated_block) to ensure idempotency
-INSERT INTO erc20_balances (chain_id, wallet, token, balance, last_updated_block)
+INSERT INTO erc20_balances (chain_id, wallet, token, total_in, total_out, last_updated_block)
 WITH 
 -- Get the max last_updated_block across all wallets/tokens for this chain
 max_block AS (
@@ -26,13 +28,8 @@ SELECT
     @chain_id as chain_id,
     agg.wallet,
     agg.token,
-    -- Calculate new balance: add incoming, subtract outgoing, clamp to 0
-    CAST(
-        if(coalesce(old.balance, toUInt256(0)) + agg.total_in >= agg.total_out,
-           coalesce(old.balance, toUInt256(0)) + agg.total_in - agg.total_out,
-           0),
-        'UInt256'
-    ) as balance,
+    coalesce(old.total_in, toUInt256(0)) + agg.total_in as total_in,
+    coalesce(old.total_out, toUInt256(0)) + agg.total_out as total_out,
     @to_block as last_updated_block
 FROM (
     SELECT 
@@ -78,7 +75,7 @@ FROM (
     GROUP BY wallet, token
 ) agg
 LEFT JOIN (
-    SELECT wallet, token, balance, last_updated_block
+    SELECT wallet, token, total_in, total_out, last_updated_block
     FROM erc20_balances FINAL
     WHERE chain_id = @chain_id
 ) old ON agg.wallet = old.wallet AND agg.token = old.token;
@@ -87,17 +84,18 @@ LEFT JOIN (
 -- QUERY EXAMPLES
 -- ===========================================
 -- Get current balance:
--- SELECT balance FROM erc20_balances FINAL
+-- SELECT total_in - total_out as balance 
+-- FROM erc20_balances FINAL
 -- WHERE chain_id = ? AND wallet = ? AND token = ?
 
 -- Get all token balances for a wallet:
--- SELECT token, balance
+-- SELECT token, total_in - total_out as balance
 -- FROM erc20_balances FINAL  
 -- WHERE chain_id = ? AND wallet = ? 
--- AND balance > 0
+-- HAVING balance > 0
 
 -- Get top holders of a token:
--- SELECT wallet, balance
+-- SELECT wallet, total_in - total_out as balance
 -- FROM erc20_balances FINAL
 -- WHERE chain_id = ? AND token = ?
 -- ORDER BY balance DESC

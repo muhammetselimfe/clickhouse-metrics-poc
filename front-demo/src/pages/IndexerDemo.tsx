@@ -14,7 +14,6 @@ interface Chain {
 interface SampleData {
     wallet: string;
     token: string;
-    block_number: number;
 }
 
 interface PopularToken {
@@ -61,12 +60,10 @@ function IndexerDemo() {
                     query: `
             SELECT 
               hex(wallet) as wallet,
-              hex(token) as token,
-              block_number
-            FROM erc20_balances
+              hex(token) as token
+            FROM erc20_balances FINAL
             WHERE chain_id = ${selectedChainId}
               AND balance > 0
-            ORDER BY block_number DESC
             LIMIT 1
           `,
                     format: 'JSONEachRow',
@@ -77,7 +74,7 @@ function IndexerDemo() {
                 const popularResult = await clickhouse.query({
                     query: `
             SELECT hex(token) as token
-            FROM erc20_balances
+            FROM erc20_balances FINAL
             WHERE chain_id = ${selectedChainId}
               AND balance > 0
             GROUP BY token
@@ -110,38 +107,34 @@ function IndexerDemo() {
         };
     }, [selectedChainId, clickhouse]);
 
-    const balanceAtBlockQuery = sampleData
-        ? `-- Get wallet balance at a specific block
--- This query retrieves the token balance for a wallet at or before a block
+    const currentBalanceQuery = sampleData
+        ? `-- Get current token balance for a specific wallet
 -- Chain ID: ${selectedChainId}
 -- Token: 0x${sampleData.token}
 -- Wallet: 0x${sampleData.wallet}
 SELECT 
-  balance as balance_wei
-FROM erc20_balances
+  balance as balance_wei,
+  last_updated_block
+FROM erc20_balances FINAL
 WHERE chain_id = ${selectedChainId}
   AND wallet = unhex('${sampleData.wallet}')
-  AND token = unhex('${sampleData.token}')
-  AND block_number <= ${sampleData.block_number + 123}
-ORDER BY block_number DESC
-LIMIT 1`
+  AND token = unhex('${sampleData.token}')`
         : '-- Loading sample data...';
 
     const topHoldersQuery = popularToken
-        ? `-- Top 5 holders of the most popular token on this chain
+        ? `-- Top 10 holders of the most popular token on this chain
 -- Token: 0x${popularToken.token}
 -- Chain ID: ${selectedChainId}
 SELECT 
   hex(wallet) as wallet_address,
-  MAX(balance) / 1000000.0 as balance_formatted,
-  MAX(block_number) as latest_block
-FROM erc20_balances
+  balance,
+  last_updated_block
+FROM erc20_balances FINAL
 WHERE chain_id = ${selectedChainId}
   AND token = unhex('${popularToken.token}')
   AND balance > 0
-GROUP BY wallet
-ORDER BY balance_formatted DESC
-LIMIT 5`
+ORDER BY balance DESC
+LIMIT 10`
         : '-- Loading sample data...';
 
     return (
@@ -150,7 +143,7 @@ LIMIT 5`
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900">Indexer Demo</h1>
                     <p className="text-gray-600 mt-2">
-                        Explore ERC20 token balances indexed from blockchain data. Select a chain to see live examples.
+                        Explore current ERC20 token balances indexed from blockchain data. Select a chain to see live examples.
                     </p>
                 </div>
 
@@ -188,13 +181,13 @@ LIMIT 5`
 
                 {sampleData && popularToken && !loadingSample && (
                     <>
-                        {/* Query 1: Balance at Block */}
+                        {/* Query 1: Current Balance */}
                         <div className="border-t border-gray-200 pt-8">
                             <QueryEditor
                                 key={`balance-${selectedChainId}-${sampleData.wallet}-${sampleData.token}`}
-                                initialQuery={balanceAtBlockQuery}
-                                title="Query 1: Balance at Block"
-                                description="Get the token balance of a specific wallet at a given block. This demonstrates time-travel queries for historical balance lookups."
+                                initialQuery={currentBalanceQuery}
+                                title="Query 1: Current Balance"
+                                description="Get the current token balance for a specific wallet. Returns the latest balance and the block it was last updated."
                             />
                         </div>
 
@@ -204,7 +197,7 @@ LIMIT 5`
                                 key={`holders-${selectedChainId}-${popularToken.token}`}
                                 initialQuery={topHoldersQuery}
                                 title="Query 2: Top Token Holders"
-                                description="Find the wallets with the highest balances for the most popular token on this chain. Useful for identifying major holders and token distribution."
+                                description="Find the wallets with the highest current balances for the most popular token on this chain."
                             />
                         </div>
                     </>
