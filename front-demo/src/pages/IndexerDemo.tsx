@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { createClient } from '@clickhouse/client-web';
 import PageTransition from '../components/PageTransition';
@@ -11,20 +11,13 @@ interface Chain {
     name: string;
 }
 
-interface SampleData {
-    wallet: string;
-    token: string;
-}
-
 interface PopularToken {
     token: string;
+    holder_count: number;
 }
 
 function IndexerDemo() {
     const [selectedChainId, setSelectedChainId] = useState<number>(43114);
-    const [sampleData, setSampleData] = useState<SampleData | null>(null);
-    const [popularToken, setPopularToken] = useState<PopularToken | null>(null);
-    const [loadingSample, setLoadingSample] = useState(false);
     const { url } = useClickhouseUrl();
     const { chains: syncStatusChains } = useSyncStatus();
 
@@ -46,104 +39,55 @@ function IndexerDemo() {
         staleTime: 5 * 60 * 1000,
     });
 
-    useEffect(() => {
-        let cancelled = false;
+    const { data: popularToken, isLoading: loadingToken } = useQuery<PopularToken>({
+        queryKey: ['popularToken', selectedChainId, url],
+        queryFn: async () => {
+            const result = await clickhouse.query({
+                query: `
+                    SELECT 
+                        hex(token) as token,
+                        count() as holder_count
+                    FROM erc20_balances
+                    WHERE chain_id = ${selectedChainId}
+                      AND balance > 0
+                    GROUP BY token
+                    HAVING holder_count >= 20
+                    ORDER BY holder_count DESC
+                    LIMIT 1
+                `,
+                format: 'JSONEachRow',
+            });
+            const data = await result.json<PopularToken>();
+            return Array.isArray(data) && data.length > 0 ? data[0] : null;
+        },
+        staleTime: 5 * 60 * 1000,
+        enabled: !!selectedChainId,
+    });
 
-        async function fetchSampleData() {
-            setLoadingSample(true);
-            setSampleData(null);
-            setPopularToken(null);
-
-            try {
-                // Fetch sample wallet-token pair for balance query
-                const sampleResult = await clickhouse.query({
-                    query: `
-            SELECT 
-              hex(wallet) as wallet,
-              hex(token) as token
-            FROM erc20_balances FINAL
-            WHERE chain_id = ${selectedChainId}
-              AND balance > 0
-            LIMIT 1
-          `,
-                    format: 'JSONEachRow',
-                });
-                const sampleDataRaw = await sampleResult.json<SampleData>();
-
-                // Fetch most popular token for top holders query
-                const popularResult = await clickhouse.query({
-                    query: `
-            SELECT hex(token) as token
-            FROM erc20_balances FINAL
-            WHERE chain_id = ${selectedChainId}
-              AND balance > 0
-            GROUP BY token
-            ORDER BY count() DESC
-            LIMIT 1
-          `,
-                    format: 'JSONEachRow',
-                });
-                const popularTokenRaw = await popularResult.json<PopularToken>();
-
-                if (!cancelled) {
-                    if (sampleDataRaw && Array.isArray(sampleDataRaw) && sampleDataRaw.length > 0) {
-                        setSampleData(sampleDataRaw[0]);
-                    }
-                    if (popularTokenRaw && Array.isArray(popularTokenRaw) && popularTokenRaw.length > 0) {
-                        setPopularToken(popularTokenRaw[0]);
-                    }
-                }
-            } catch (err) {
-                console.error('Error fetching sample data:', err);
-            } finally {
-                setLoadingSample(false);
-            }
-        }
-
-        fetchSampleData();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [selectedChainId, clickhouse]);
-
-    const currentBalanceQuery = sampleData
-        ? `-- Get current token balance for a specific wallet
--- Chain ID: ${selectedChainId}
--- Token: 0x${sampleData.token}
--- Wallet: 0x${sampleData.wallet}
-SELECT 
-  balance as balance_wei,
-  last_updated_block
-FROM erc20_balances FINAL
-WHERE chain_id = ${selectedChainId}
-  AND wallet = unhex('${sampleData.wallet}')
-  AND token = unhex('${sampleData.token}')`
-        : '-- Loading sample data...';
-
-    const topHoldersQuery = popularToken
-        ? `-- Top 10 holders of the most popular token on this chain
+    const holdersQuery = popularToken
+        ? `-- Get token holders with pagination (page 2)
 -- Token: 0x${popularToken.token}
 -- Chain ID: ${selectedChainId}
+-- Total holders: ${popularToken.holder_count}
 SELECT 
-  hex(wallet) as wallet_address,
+  lower(hex(wallet)) as wallet_address,
   balance,
   last_updated_block
-FROM erc20_balances FINAL
+FROM erc20_balances
 WHERE chain_id = ${selectedChainId}
   AND token = unhex('${popularToken.token}')
   AND balance > 0
 ORDER BY balance DESC
-LIMIT 10`
-        : '-- Loading sample data...';
+LIMIT 10 OFFSET 10`
+        : '-- Loading popular token...';
 
     return (
         <PageTransition>
             <div className="p-8 space-y-6">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900">Indexer Demo</h1>
+                    <h1 className="text-3xl font-bold text-gray-900">ERC-20 Balance Indexer</h1>
                     <p className="text-gray-600 mt-2">
-                        Explore current ERC20 token balances indexed from blockchain data. Select a chain to see live examples.
+                        Query current token balances indexed from blockchain events. Example shows paginated holder list for the most popular token.
                     </p>
                 </div>
 
@@ -173,39 +117,26 @@ LIMIT 10`
                         ) : (
                             <p className="text-sm text-red-600">Error loading chains</p>
                         )}
-                        {loadingSample && (
-                            <span className="text-sm text-gray-500 ml-2">Loading sample data...</span>
+                        {loadingToken && (
+                            <span className="text-sm text-gray-500 ml-2">Loading token data...</span>
                         )}
                     </div>
                 </div>
 
-                {sampleData && popularToken && !loadingSample && (
-                    <>
-                        {/* Query 1: Current Balance */}
-                        <div className="border-t border-gray-200 pt-8">
-                            <QueryEditor
-                                key={`balance-${selectedChainId}-${sampleData.wallet}-${sampleData.token}`}
-                                initialQuery={currentBalanceQuery}
-                                title="Query 1: Current Balance"
-                                description="Get the current token balance for a specific wallet. Returns the latest balance and the block it was last updated."
-                            />
-                        </div>
-
-                        {/* Query 2: Top Token Holders */}
-                        <div className="border-t border-gray-200 pt-8">
-                            <QueryEditor
-                                key={`holders-${selectedChainId}-${popularToken.token}`}
-                                initialQuery={topHoldersQuery}
-                                title="Query 2: Top Token Holders"
-                                description="Find the wallets with the highest current balances for the most popular token on this chain."
-                            />
-                        </div>
-                    </>
+                {popularToken && !loadingToken && (
+                    <div className="border-t border-gray-200 pt-8">
+                        <QueryEditor
+                            key={`holders-${selectedChainId}-${popularToken.token}`}
+                            initialQuery={holdersQuery}
+                            title="Token Holders Query (Paginated)"
+                            description="Get holders 11-20 by balance for the most popular token. Change LIMIT/OFFSET for different pages. Optimized with ORDER BY (chain_id, token, wallet) for fast token-centric queries."
+                        />
+                    </div>
                 )}
 
-                {(!sampleData || !popularToken) && !loadingSample && (
+                {!popularToken && !loadingToken && (
                     <div className="bg-white rounded-lg shadow p-8 text-center">
-                        <p className="text-gray-600">No balance data available for this chain.</p>
+                        <p className="text-gray-600">No tokens with 20+ holders found on this chain.</p>
                     </div>
                 )}
             </div>
