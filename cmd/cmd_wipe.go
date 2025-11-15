@@ -86,7 +86,7 @@ func wipeCalculatedTables(conn driver.Conn, all bool) error {
 	fmt.Printf("Found %d calculated tables to drop\n", len(tables))
 
 	for _, table := range tables {
-		dropQuery := fmt.Sprintf("DROP TABLE IF EXISTS `%s`.`%s`", table.database, table.name)
+		dropQuery := fmt.Sprintf("DROP TABLE IF EXISTS `%s`.`%s` SETTINGS max_table_size_to_drop=0", table.database, table.name)
 		fmt.Printf("Dropping %s.%s...\n", table.database, table.name)
 
 		if err := conn.Exec(ctx, dropQuery); err != nil {

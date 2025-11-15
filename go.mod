@@ -7,10 +7,12 @@ require (
 	github.com/ava-labs/avalanchego v1.14.1-0.20251106202910-8ebe57a20bba
 	github.com/cockroachdb/pebble/v2 v2.1.1
 	github.com/dustin/go-humanize v1.0.1
+	github.com/fatih/color v1.13.0
 	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sync v0.17.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -57,6 +59,8 @@ require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/minio/minlz v1.0.1-0.20250507153514-87eb42fe8882 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
@@ -105,7 +109,6 @@ require (
 	google.golang.org/grpc v1.75.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 exclude google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1

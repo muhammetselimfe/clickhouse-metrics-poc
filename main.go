@@ -45,6 +45,11 @@ func main() {
 			Short: "Show ClickHouse table sizes and disk usage",
 			Run:   func(command *cobra.Command, args []string) { cmd.RunSize() },
 		},
+		&cobra.Command{
+			Use:   "duplicates",
+			Short: "Check for duplicate records in raw tables",
+			Run:   func(command *cobra.Command, args []string) { cmd.RunDuplicates() },
+		},
 		wipeCmd,
 	)
 

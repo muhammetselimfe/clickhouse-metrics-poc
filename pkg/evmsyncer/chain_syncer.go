@@ -136,6 +136,7 @@ func (cs *ChainSyncer) Start() error {
 	}
 
 	// Query max block for each table once at startup
+	// This is critical for preventing duplicates - we only insert blocks > maxBlock
 	cs.maxBlockBlocks, err = chwrapper.GetLatestBlockForChain(cs.conn, "raw_blocks", cs.chainId)
 	if err != nil {
 		return fmt.Errorf("failed to get max block from blocks table: %w", err)
@@ -156,7 +157,9 @@ func (cs *ChainSyncer) Start() error {
 		return fmt.Errorf("failed to get max block from logs table: %w", err)
 	}
 
-	log.Printf("[Chain %d] Starting from block %d", cs.chainId, startBlock)
+	log.Printf("[Chain %d] Max blocks in tables - blocks: %d, txs: %d, traces: %d, logs: %d",
+		cs.chainId, cs.maxBlockBlocks, cs.maxBlockTransactions, cs.maxBlockTraces, cs.maxBlockLogs)
+	log.Printf("[Chain %d] Starting from block %d (watermark: %d)", cs.chainId, startBlock, cs.watermark)
 
 	// Get latest block from RPC
 	latestBlock, err := cs.fetcher.GetLatestBlock()
@@ -336,9 +339,9 @@ func (cs *ChainSyncer) writerLoop() {
 
 		start := time.Now()
 		if err := cs.writeBlocks(buffer); err != nil {
-			log.Printf("[Chain %d] Error writing blocks: %v", cs.chainId, err)
-			// TODO: Implement retry logic
-			return cs.flushInterval
+			// Panic on database write failure to ensure consistency
+			// We cannot afford partial writes or inconsistent state
+			log.Fatalf("[Chain %d] FATAL: Database write failed, cannot continue: %v", cs.chainId, err)
 		}
 
 		elapsed := time.Since(start)
@@ -391,6 +394,12 @@ func (cs *ChainSyncer) writerLoop() {
 }
 
 // writeBlocks writes blocks to all tables in parallel and updates watermark
+// Duplicate prevention strategy:
+// 1. Start from watermark (guaranteed safe position where all tables have data)
+// 2. Filter blocks by maxBlock for each table (only insert blocks > maxBlock)
+// 3. Insert to all 4 tables in parallel - any failure causes panic
+// 4. Update watermark only after ALL tables succeed - failure causes panic
+// This ensures consistency: either all operations succeed or the app crashes
 func (cs *ChainSyncer) writeBlocks(blocks []*evmrpc.NormalizedBlock) error {
 	if len(blocks) == 0 {
 		return nil
@@ -446,7 +455,9 @@ func (cs *ChainSyncer) writeBlocks(blocks []*evmrpc.NormalizedBlock) error {
 
 	if maxBlock > cs.watermark {
 		if err := chwrapper.SetWatermark(cs.conn, cs.chainId, maxBlock); err != nil {
-			return fmt.Errorf("failed to update watermark: %w", err)
+			// Panic on watermark update failure - this is critical for preventing duplicates
+			// If we can't update watermark after successful inserts, we risk data duplication on restart
+			log.Fatalf("[Chain %d] FATAL: Failed to update watermark after successful inserts: %v", cs.chainId, err)
 		}
 		cs.watermark = maxBlock
 	}
