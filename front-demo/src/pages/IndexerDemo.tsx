@@ -39,9 +39,9 @@ function IndexerDemo() {
         staleTime: 5 * 60 * 1000,
     });
 
-    const { data: popularToken, isLoading: loadingToken } = useQuery<PopularToken>({
+    const { data: popularToken, isLoading: loadingToken } = useQuery<PopularToken | null>({
         queryKey: ['popularToken', selectedChainId, url],
-        queryFn: async () => {
+        queryFn: async (): Promise<PopularToken | null> => {
             const result = await clickhouse.query({
                 query: `
                     SELECT 
