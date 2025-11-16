@@ -78,7 +78,7 @@ WHERE chain_id = ${selectedChainId}
   AND token = unhex('${popularToken.token}')
   AND balance > 0
 ORDER BY balance DESC
-LIMIT 10 OFFSET 10`
+LIMIT 10`
         : '-- Loading popular token...';
 
     return (
