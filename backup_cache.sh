@@ -72,6 +72,37 @@ stats() {
     restic stats
 }
 
+# Function to restore from backup
+restore() {
+    # Check if rpc_cache directory already exists
+    if [ -d "$BACKUP_DIR" ]; then
+        echo "Error: Directory $BACKUP_DIR already exists!"
+        echo "Remove or rename it before restoring to avoid data corruption."
+        exit 1
+    fi
+
+    # Get snapshot ID from argument or use latest
+    SNAPSHOT_ID="${2:-latest}"
+    
+    echo "Restoring snapshot $SNAPSHOT_ID to $BACKUP_DIR..."
+    
+    # Create parent directory if needed
+    mkdir -p "$(dirname "$BACKUP_DIR")"
+    
+    # Restore the backup
+    restic restore "$SNAPSHOT_ID" \
+        --target "$(dirname "$BACKUP_DIR")" \
+        --verbose
+    
+    if [ $? -eq 0 ]; then
+        echo "Restore completed successfully!"
+        echo "Restored to: $BACKUP_DIR"
+    else
+        echo "Restore failed!"
+        exit 1
+    fi
+}
+
 # Function to forget old snapshots (keep last 7 daily, 4 weekly, 6 monthly)
 prune_old() {
     echo "Pruning old snapshots..."
