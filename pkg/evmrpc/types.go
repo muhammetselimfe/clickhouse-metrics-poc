@@ -55,6 +55,8 @@ type Block struct {
 	BlobGasUsed           string        `json:"blobGasUsed,omitempty"`
 	ExcessBlobGas         string        `json:"excessBlobGas,omitempty"`
 	ParentBeaconBlockRoot string        `json:"parentBeaconBlockRoot,omitempty"`
+	MinDelayExcess        string        `json:"minDelayExcess,omitempty"`
+	TimestampMilliseconds string        `json:"timestampMilliseconds,omitempty"`
 }
 
 type CallTrace struct {

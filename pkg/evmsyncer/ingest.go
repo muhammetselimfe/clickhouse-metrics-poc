@@ -168,7 +168,8 @@ func InsertBlocks(ctx context.Context, conn clickhouse.Conn, chainID uint32, blo
 		difficulty, total_difficulty, size, gas_limit, gas_used, base_fee_per_gas,
 		block_gas_cost, state_root, transactions_root, receipts_root, extra_data,
 		block_extra_data, ext_data_hash, ext_data_gas_used, mix_hash, nonce,
-		sha3_uncles, uncles, blob_gas_used, excess_blob_gas, parent_beacon_block_root
+		sha3_uncles, uncles, blob_gas_used, excess_blob_gas, parent_beacon_block_root,
+		min_delay_excess
 	)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare batch: %w", err)
@@ -188,7 +189,19 @@ func InsertBlocks(ctx context.Context, conn clickhouse.Conn, chainID uint32, blo
 		if err != nil {
 			return fmt.Errorf("failed to parse timestamp: %w", err)
 		}
-		blockTime := time.Unix(int64(timestamp), 0).UTC()
+
+		// Use TimestampMilliseconds if available, otherwise use Timestamp * 1000
+		// Some chains provide ms precision timestamps which we prefer
+		var blockTime time.Time
+		timestampMs, errMs := hexToUint64(block.TimestampMilliseconds)
+		if errMs == nil && timestampMs > 0 {
+			// Convert ms to sec and nsec
+			sec := int64(timestampMs / 1000)
+			nsec := int64((timestampMs % 1000) * 1000000)
+			blockTime = time.Unix(sec, nsec).UTC()
+		} else {
+			blockTime = time.Unix(int64(timestamp), 0).UTC()
+		}
 
 		// Convert hashes
 		hash, err := hexToFixedBytes(block.Hash, 32)
@@ -307,6 +320,11 @@ func InsertBlocks(ctx context.Context, conn clickhouse.Conn, chainID uint32, blo
 		}
 		parentBeaconRoot := string(parentBeaconRootBytes) // LowCardinality requires string
 
+		minDelayExcess, err := hexToUint64(block.MinDelayExcess)
+		if err != nil {
+			return fmt.Errorf("failed to parse min delay excess: %w", err)
+		}
+
 		// Append to batch
 		err = batch.Append(
 			chainID,
@@ -336,6 +354,7 @@ func InsertBlocks(ctx context.Context, conn clickhouse.Conn, chainID uint32, blo
 			blobGasUsed,
 			excessBlobGas,
 			parentBeaconRoot,
+			minDelayExcess,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append block %d: %w", blockNumber, err)
@@ -402,7 +421,19 @@ func InsertTransactions(ctx context.Context, conn clickhouse.Conn, chainID uint3
 		if err != nil {
 			return fmt.Errorf("failed to parse timestamp: %w", err)
 		}
-		blockTime := time.Unix(int64(timestamp), 0).UTC()
+
+		// Use TimestampMilliseconds if available, otherwise use Timestamp * 1000
+		// Some chains provide ms precision timestamps which we prefer
+		var blockTime time.Time
+		timestampMs, errMs := hexToUint64(block.TimestampMilliseconds)
+		if errMs == nil && timestampMs > 0 {
+			// Convert ms to sec and nsec
+			sec := int64(timestampMs / 1000)
+			nsec := int64((timestampMs % 1000) * 1000000)
+			blockTime = time.Unix(sec, nsec).UTC()
+		} else {
+			blockTime = time.Unix(int64(timestamp), 0).UTC()
+		}
 
 		baseFeePerGas, _ := hexToUint64(block.BaseFeePerGas)
 
@@ -735,7 +766,19 @@ func InsertTraces(ctx context.Context, conn clickhouse.Conn, chainID uint32, blo
 		if err != nil {
 			return fmt.Errorf("failed to parse timestamp: %w", err)
 		}
-		blockTime := time.Unix(int64(timestamp), 0).UTC()
+
+		// Use TimestampMilliseconds if available, otherwise use Timestamp * 1000
+		// Some chains provide ms precision timestamps which we prefer
+		var blockTime time.Time
+		timestampMs, errMs := hexToUint64(block.TimestampMilliseconds)
+		if errMs == nil && timestampMs > 0 {
+			// Convert ms to sec and nsec
+			sec := int64(timestampMs / 1000)
+			nsec := int64((timestampMs % 1000) * 1000000)
+			blockTime = time.Unix(sec, nsec).UTC()
+		} else {
+			blockTime = time.Unix(int64(timestamp), 0).UTC()
+		}
 
 		// Process traces for each transaction
 		for i, tx := range block.Transactions {
@@ -869,7 +912,19 @@ func InsertLogs(ctx context.Context, conn clickhouse.Conn, chainID uint32, block
 		if err != nil {
 			return fmt.Errorf("failed to parse timestamp: %w", err)
 		}
-		blockTime := time.Unix(int64(timestamp), 0).UTC()
+
+		// Use TimestampMilliseconds if available, otherwise use Timestamp * 1000
+		// Some chains provide ms precision timestamps which we prefer
+		var blockTime time.Time
+		timestampMs, errMs := hexToUint64(block.TimestampMilliseconds)
+		if errMs == nil && timestampMs > 0 {
+			// Convert ms to sec and nsec
+			sec := int64(timestampMs / 1000)
+			nsec := int64((timestampMs % 1000) * 1000000)
+			blockTime = time.Unix(sec, nsec).UTC()
+		} else {
+			blockTime = time.Unix(int64(timestamp), 0).UTC()
+		}
 
 		// Process logs from each transaction
 		for i, receipt := range receipts {
