@@ -4,3 +4,5 @@ config.json
 config.yaml
 sync.log
 terminals/
+clickhouse-metrics-poc
+clickhouse-metrics-poc-linux
