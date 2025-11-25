@@ -985,7 +985,7 @@ func ParseValidatorInfo(info ValidatorInfo, subnetID ids.ID) (*ValidatorState, e
 		Weight:       weight,
 		Balance:      balance,
 		Uptime:       uptime,
-		Active:       info.Connected,
+		Active:       true, // If returned by getCurrentValidators, it is active. info.Connected is just p2p status.
 	}
 
 	// Parse StartTime
